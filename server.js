@@ -22,6 +22,8 @@ var join                      = require('path').join;
 var resolve                   = require('path').resolve;
 
 var createClient              = require('redis').createClient;
+var compile                   = require('handlebars').compile;
+var registerHelper            = require('handlebars').registerHelper;
 
 var ROUTE                     = (function $(r,m,f,a){$[r+m]=[RegExp(r),m,f,a];});
 
@@ -44,13 +46,19 @@ var options                   = Object.create(DEFAULT_OPTIONS);
 var redis                     = null;
 
 
-ROUTE('/$',                     'GET',      handleView, 'index.html');
-ROUTE('/test-container$',       'GET',      handleView, 'test-container.html');
-ROUTE('/tests$',                'POST',     handleTestResults);
-ROUTE('/static/(.*)$',          'GET',      handleStatic, 'static');
-ROUTE('/dist/(.*)$',            'GET',      handleStatic, 'dist');
-ROUTE('/tests/(.*)$',           'GET',      handleStatic, 'tests');
+ROUTE('^/$',                     'GET',      handleView, 'index.html');
+ROUTE('^/test-container$',       'GET',      handleView, 'test-container.html');
+ROUTE('^/tests$',                'POST',     handleTestResults);
+ROUTE('^/results/$',             'GET',      handleListResults);
+ROUTE('^/results/(.*)$',         'GET',      handleViewResult);
+ROUTE('^/static/(.*)$',          'GET',      handleStatic, 'static');
+ROUTE('^/dist/(.*)$',            'GET',      handleStatic, 'dist');
+ROUTE('^/tests/(.*)$',           'GET',      handleStatic, 'tests');
 
+
+require('handlebars').registerHelper('datefrmt', function (val) {
+  return (new Date(val)).toGMTString();
+});
 
 
 function main () {
@@ -152,6 +160,72 @@ function handleTestResults (req, res, expr) {
 }
 
 
+function handleListResults (req, res, expr, url) {
+  redis.keys('test:*', function (err, keys) {
+    var multi;
+    if (err) {
+      res.writeHead(500);
+      res.end();
+      return;
+    }
+    multi = redis.multi();
+    keys.forEach(function (key) {
+      multi.get(key);
+    });
+    multi.exec(function (err, results) {
+      if (err) {
+        res.writeHead(200);
+        res.end();
+        return;
+      }
+      results = results.map(function (result) {
+        var nosuccess = 0;
+        var nofailure = 0;
+
+        result = JSON.parse(result);
+
+        result.results.forEach(function (result) {
+          result.status == 'ok' ? nosuccess++ : nofailure++;
+        });
+
+        result.totalTests = result.results.length;
+        result.totalSuccess = nosuccess;
+        result.totalFailed = nofailure;
+
+        return result;
+      });
+
+      results.sort(function (a, b) {
+        return b.timestamp - a.timestamp;
+      });
+
+      renderTemplate(res, 'results.html', { results: results });
+    });
+  });
+}
+
+
+function handleViewResult (req, res, expr, url) {
+  redis.get('test:' + expr[1], function (err, result) {
+
+    if (err) {
+      res.writeHead(500);
+      res.end();
+      return;
+    }
+
+    if (result == null) {
+      res.writeHead(404);
+      res.end('Not found');
+      return;
+    }
+
+    result = JSON.parse(result);
+    renderTemplate(res, 'result.html', { result: result });
+  });
+}
+
+
 function handleError (req, res, code, message) {
   res.writeHead(code || 500);
   res.end(message || 'Unknown error');
@@ -164,10 +238,14 @@ function renderTemplate (res, name, ctx) {
   path = join(TEMPLATE_BASE, name);
 
   readFile(path, function (err, data) {
+    var tmpl;
 
     if (err) {
       return handleError(null, res, 500, err.message);
     }
+
+    tmpl = compile(data.toString());
+    data = tmpl(ctx);
 
     res.setHeader('Content-Type', CONTENT_TYPES[extname(path)]);
     res.setHeader('Content-Length', data.length);

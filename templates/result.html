@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Hydna Browser Test Suite</title>
+    <style>
+      table {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Results for for {{result.id}}</h1>
+    <dl>
+      <dt>Date</dt><dd>{{datefrmt result.timestamp}}</dd>
+      <dt>UserAgent</dt><dd>{{result.useragent}}</dd>
+      <dt>Lib version</dt><dd>{{result.libver}}</dd>
+      <dt>Domain</dt><dd>{{result.domain}}</dd>
+      <dt>Signature</dt><dd>{{result.signature}}</dd>
+      <dt>Comment</dt><dd>{{result.comment}}</dd>
+    </dl>
+    <table>
+      <thead>
+        <tr>
+          <td>ID</td>
+          <td>Status</td>
+          <td>Message</td>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each result.results}}
+        <tr>
+          <td>{{id}}</td>
+          <td>{{status}}</td>
+          <td>{{message}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </body>
+</html>

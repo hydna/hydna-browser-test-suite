@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Hydna Browser Test Suite</title>
+    <style>
+      table {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <table>
+      <thead>
+        <tr>
+          <td>ID</td>
+          <td>Date</td>
+          <td>signature</td>
+          <td>Results</td>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each results}}
+        <tr>
+          <td><a href="/results/{{id}}">{{id}}</a></td>
+          <td>{{datefrmt timestamp}}</td>
+          <td>{{signature}}</td>
+          <td>{{totalTests}} tests ({{totalSuccess}} success, {{totalFailed}} failed)</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </body>
+</html>
