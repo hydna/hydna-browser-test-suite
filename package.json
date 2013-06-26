@@ -1,0 +1,16 @@
+{
+  "author": "Hydna AB (https://www.hydna.com)",
+  "name": "hydna-browser-test-suite",
+  "description": "Test suite server for hydna browser clients libs",
+  "version": "1.0.0",
+  "dependencies": {
+    "redis": "~0.8.3"
+  },
+	"repository": {
+		"type": "git",
+		"url": "git://github.com/hydna/hydna-browser-test-suite.git"
+	},  
+  "engines": {
+    "node": ">=0.8.7"
+  }
+}

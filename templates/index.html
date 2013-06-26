@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Hydna Browser Test Suite</title>
+    <style>
+
+      body {
+        margin: 0;
+        padding: 0;
+        font-size: 62.5%;
+        line-height: 1;
+        font-family: "droid-sans-1","droid-sans-2","helvetica neue",arial,sans-serif;
+        background: #F2F2F2;
+        background: #EDF2F1;
+        color: #333;
+        font-size: 16px;
+        -webkit-text-size-adjust: none;
+      }
+
+      body a {
+        text-decoration: none;
+        color: #4F8B99;
+        font-weight: bold;
+      }
+
+      .header {
+        position: relative;
+        background: #2D3236;
+        background: #282D30;
+        background: -moz-linear-gradient(top,#2D3236 0%, #282D30 100%);
+        background: -webkit-gradient(linear, left top, left bottom, color-stop(0%, #2D3236), color-stop(100%, #282D30));
+        background: -webkit-linear-gradient(top, #2D3236 0%, #282D30 100%);
+        background: -o-linear-gradient(top, #2D3236 0%, #282D30 100%);
+        background: -ms-linear-gradient(top, #2D3236 0%, #282D30 100%);
+        background: linear-gradient(to bottom, #2D3236 0%, #282D30 100%);
+        height: 50px;
+        color: white;
+      }
+
+      .header .logo {
+        position: absolute;
+        display: block;
+        top: 10px;
+        left: 20px;
+        width: 200px;
+        height: 30px;
+        text-indent: -10000px;
+        font-size: 0;
+        background: url(https://www.hydna.com/static/images/logo.png) left center no-repeat;
+      }
+
+      .header ul {
+        position: absolute;
+        margin: 0 0 0 220px;
+        padding: 0;
+        list-style: none;
+        overflow: hidden;
+      }
+
+      .header ul li {
+        float: left;
+        margin-right: 20px;
+        padding: 0;
+      }
+
+      .header ul li a {
+        display: block;
+        color: white;
+        padding: 0 10px;
+        line-height: 50px;
+        font-size: 12px;
+      }
+
+      .header ul li.selected a {
+        background-color: #3b4249;
+      }
+
+      .side-menu {
+        width: 200px;
+      }
+
+
+      .pane {
+        position: absolute;
+
+        top: 50px;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+
+      .side-menu {
+        position: absolute;
+
+        background: #cacfce;
+
+        top: 0;
+        width: 220px;
+        bottom: 0;
+        left: 0;
+
+        overflow: auto;
+      }
+
+      .control-group {
+        padding: 8px 0;
+      }
+
+      .side-menu .control-group {
+        padding: 8px 10px;
+      }
+
+      .control-group label {
+        color: #30373b;
+        font-size: 12px;
+        font-weight: bold;
+      }
+
+      .control-group textarea,
+      .control-group input[type=text] {
+        border: 1px solid #859fc0;
+        border-radius: 3px;
+        padding: 4px 0;
+        width: 100%;
+        line-height: 16px;
+        font-size: 12px;
+        text-indent: 3px;
+      }
+
+      .control-group select {
+        border: 1px solid #859fc0;
+        border-radius: 3px;
+        padding: 0;
+        width: 100%;
+        line-height: 16px;
+        font-size: 12px;
+      }
+
+      #message-list {
+        list-style: none;
+        font-size: 14px;
+        height: 49%;
+        margin: 0;
+        padding: 4px 0 0 0;
+        overflow: auto;
+      }
+
+      #message-list li {
+        padding: 8px 12px;
+        margin-bottom: 1px;
+        min-height: 10px;
+      }
+
+      #message-list li a {
+        color: black;
+        font-weight: normal;
+        text-decoration: underline;
+      }
+
+      #message-list li.pending {
+        background: #ddd;
+      }
+
+      #message-list li.running {
+        background: #8cc8dd;
+      }
+
+      #message-list li.success {
+        background: #89dd13;
+      }
+
+      #message-list li.error {
+        background: #dd4143;
+      }
+
+      #message-list li .status {
+        margin-left: 8px;
+        font-style: italic;
+      }
+
+      .content {
+        position: absolute;
+        left: 221px;
+        right: 0;
+        height: 100%;
+      }
+
+      .popup {
+        display: none;
+      }
+
+      #test-suite {
+        display: block;
+      }
+
+      #test-form #abort-test {
+        display: none;
+      }
+
+      #test-form.running #abort-test {
+        display: inline;
+      }
+
+      #test-container {
+        position: absolute;
+        top: 50%;
+        height: 50%;
+        left: 0;
+        width: 100%;
+      }
+
+      iframe {
+        border: none;
+      }
+
+      #test-report-dialog {
+        position: absolute;
+
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+      }
+
+      #test-report-dialog .shader {
+        position: absolute;
+        background: black;
+
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+
+        opacity: 0.4;
+      }
+
+      #test-report-dialog .dialog {
+        position: absolute;
+
+        background: white;
+
+        left: 50%;
+        top: 20px;
+        width: 320px;
+
+        padding: 10px;
+
+        margin-left: -170px;
+
+        font-size: 12px;
+      }
+
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <a class="logo" href="/">Hydna</a>
+      <ul>
+        <li class="selected"><a href="#test-suite">Test Suite</a></li>
+      </ul>
+    </div>
+
+    <div id="test-suite" class="pane">
+      <div class="side-menu">
+        <form id="test-form">
+          <div class="control-group">
+            <label for="domain">Domain</label>
+            <input id="domain" type="text">
+          </div>
+          <div class="control-group">
+            <label for="transports">Transports</label>
+            <select id="transports" multiple>
+              <option value="websocket" selected>WebSockets</option>
+              <option value="flash" selected>Flash (TCP)</option>
+              <option value="comet" selected>Comet</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="sources">Test cases</label>
+            <select id="sources" multiple>
+              <option value="tests/test-message-burst.js" selected>Message burst test</option>
+              <option value="tests/test-destroy-connection.js" selected>Destroy connection test</option>
+              <option value="tests/test-connect-close.js" selected>Connect close test</option>
+              <option value="tests/test-maxlimit.js" selected>Max limit test</option>
+              <option value="tests/test-mode.js" selected>Mode test</option>
+              <option value="tests/test-multichan.js" selected>Multi-channel test</option>
+              <option value="tests/test-priority.js" selected>Priority test</option>
+              <option value="tests/test-read-write-only.js" selected>Read-Write-only test</option>
+              <option value="tests/test-signal.js" selected>Signal test</option>
+              <option value="tests/test-utf8.js" selected>UTF-8 test</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <button type="submit">Start tests</button>
+            <button id="abort-test">Abort test</button>
+          </div>
+        </form>
+      </div>
+      <div class="content">
+        <ul id="message-list">
+          <li></li>
+        </ul>
+        <div id="test-container">
+        </div>
+      </div>
+    </div>
+
+    <div id="test-report-dialog" class="popup">
+      <div class="shader"></div>
+      <div class="dialog">
+        <h3>Send report to Hydna</h3>
+        <p>Please help us to improve the platform and make it available to as many devices as possible by sumbit the results of the tests.</p>
+        <form id="report-form">
+          <input id="report-domain" type="hidden" name="domain" value="">
+          <input type="hidden" name="" value="">
+          <div class="control-group">
+            <label for="report-comment">Comment</label>
+            <textarea id="report-comment"></textarea>
+          </div>
+          <div class="control-group">
+            <label for="report-signature">Signatur</label>
+            <input id="report-signature" type="text">
+          </div>
+          <div class="control-group">
+            <button type="submit">Send Report</button>
+            <a id="report-cancel">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="dist/lib.js"></script>
+    <script src="static/json2.js"></script>
+    <script src="static/utils.js"></script>
+    <script>
+
+    (function (root) {
+
+      'use strict';
+
+      var qs = decodeQueryString();
+      var testform = document.getElementById('test-form');
+      var reportform = document.getElementById('report-dialog');
+      var domain = document.getElementById('domain');
+      var tests = document.getElementById('tests');
+      var abort = document.getElementById('abort-test');
+      var cancel = document.getElementById('report-cancel');
+      var abortSignal = false;
+      
+
+      if ('domain' in qs) {
+        domain.value = qs.domain;
+      }
+
+      function setFormState (enabled) {
+        testform.className = enabled ? '' : 'running';
+        for (var i = 0; i < testform.elements.length; i++) {
+          if (testform.elements[i].getAttribute('id') == 'abort-test') {
+            continue;
+          }
+          if (enabled) {
+            testform.elements[i].removeAttribute('disabled');
+            testform.elements[i].removeAttribute('readonly');
+          } else {
+            testform.elements[i].setAttribute('disabled', 'disabled');
+            testform.elements[i].setAttribute('readonly', 'readonly');
+          }
+        }
+      }
+
+      function postResults (url, data, success, failure) {
+        var xhr;
+
+        if (window.XMLHttpRequest) {
+          xhr = new XMLHttpRequest(); 
+        } else {
+          xhr = new window.ActiveXObject("Microsoft.XMLHTTP");
+        }
+
+        xhr.open('POST', url, true);
+        xhr.onreadystatechange = function () {
+          switch (true) {
+            case xhr.readyState == 4 && xhr.status >= 200 && xhr.status <= 300:
+            return success(xhr.responseText);
+
+            case xhr.readyState == 4:
+            return failure();
+          }
+        };
+        xhr.send(data);
+      }
+
+      function createIFrame (url) {
+        var iframe;
+        
+        iframe = document.createElement("iframe");
+
+        iframe.style.position = "absolute";
+        iframe.style.top = "0px";
+        iframe.style.left = "0px"
+        iframe.style.width = "100%";
+        iframe.style.height = "100%";
+        iframe.src = url;
+
+        return iframe;
+      }
+
+      function buildtestlist (transports, sources) {
+        var list = document.getElementById('message-list');
+        var lis = [];
+        var href;
+        var li;
+        var alink;
+
+        transports = getSelectedOptions(transports ||
+                                        document.getElementById('transports'));
+
+        sources = getSelectedOptions(sources ||
+                                     document.getElementById('sources'));
+
+        list.innerHTML = '';
+
+        for (var i = 0; i < transports.length; i++) {
+          for (var i2 = 0; i2 < sources.length; i2++) {
+            li = document.createElement('li');
+            li.className = 'pending';
+            li.setAttribute('id', transports[i].value + ':' + sources[i2].value);
+
+            alink = document.createElement('a');
+            href = 'test-container?';
+            href += 'script=' + sources[i2].value;
+            href += '&domain=' + encodeURIComponent(domain.value);
+            href += '&transport=' + transports[i].value;
+            alink.setAttribute('href', href);
+            alink.innerHTML = transports[i].title +
+                              ' <b>--</b> ' +
+                              sources[i2].title;
+            li.appendChild(alink);
+            li.innerHTML += '<span class="status">Pending</span>';
+            list.appendChild(li);
+            lis.push(li);
+          }          
+        }
+      }
+
+      function runtests (C) {
+        var list = document.getElementById('message-list');
+        var results = [];
+        var all = [];
+
+        setFormState(false);
+        abortSignal = false;
+
+        for (var i = 0; i < list.childNodes.length; i++) {
+          if (list.childNodes[i].tagName == 'LI') {
+            all.push(list.childNodes[i]);
+          }
+        }
+
+        (function loop (lastresult) {
+          var test;
+          if (lastresult) {
+            results.push(lastresult);
+          }
+          if (!(test = all.shift())) {
+            return C(results);
+          }
+          runtest(test, loop);
+        }());
+      }
+
+
+      function runtest (li, C) {
+        var container = document.getElementById('test-container');
+        var alink = li.getElementsByTagName('a')[0];
+        var status = li.getElementsByTagName('span')[0];
+        var iframe;
+        var idx;
+
+        li.className = 'running';
+        status.innerText = 'Running';
+
+        function onresult (result) {
+          result.id = li.getAttribute('id');
+          if (result.status == 'error') {
+            li.className = 'error';
+            status.innerText = result.message;
+          } else {
+            li.className = 'success';
+            status.innerText = result.message;
+          }
+          return C(result);
+        }
+
+        function embed () {
+          var href = alink.getAttribute('href');
+          href += '&callback=' + encodeURIComponent(window.location.href);
+          iframe = createIFrame(href);
+          container.appendChild(iframe);
+          poll();
+        }
+
+        function poll() {
+          var m;
+          var idx;
+
+          if (abortSignal) {
+            setFormState(true);
+            container.removeChild(iframe);
+            return;
+          }
+
+          if (!(m = /\#(.+)$/.exec(window.location.href))) {
+            setTimeout(poll, 500);
+          } else {
+            idx = window.location.href.indexOf("#");
+            window.location = window.location.href.substr(0, idx) + "#";
+            setTimeout(function () {
+              container.removeChild(iframe);
+              onresult(decodeQueryString(m[1]));
+            }, 100);
+          }
+        }
+
+        if ((idx = window.location.href.indexOf("#")) == -1) {
+          window.location = window.location.href + "#";
+          setTimeout(function() {
+            setTimeout(embed, 300);
+          }, 100);
+        } else {
+          setTimeout(embed, 300);
+        }
+      }
+
+      function ondone (results) {
+        var dialog = document.getElementById('test-report-dialog');
+        var form = document.getElementById('report-form');
+        var cancel = document.getElementById('report-cancel');
+
+        document.getElementById('report-signature').value = qs.signature || '(anonymous)';
+        document.getElementById('report-comment').value = qs.comment || '';
+
+        dialog.style.display = 'block';
+
+        function dopost () {
+          var data;
+
+          data = {
+            'domain':     domain.value,
+            'useragent':  navigator.userAgent,
+            'libver':     TestChannel.VERSION,
+            'results':    results
+          };
+
+          data.comment = document.getElementById('report-comment').value;
+          data.signature = document.getElementById('report-signature').value;
+
+          postResults(
+            '/tests',
+            JSON.stringify(data),
+            function (data) {
+              dialog.style.display = 'none';
+              alert('Posted results successfully. Test case #' + data);
+            },
+            function () {
+              alert('A error occurent while sending results to server. Please try again');
+            }
+          );
+        }
+
+        cancel.onclick = function (evt) {
+          evt.preventDefault();
+          dialog.style.display = 'none';
+        };
+
+        form.onsubmit = function (evt) {
+          evt.preventDefault();
+          dopost();
+        };
+
+        if (qs.autopost == '1') {
+          setTimeout(function () {
+            dopost();
+          }, 100);
+        } 
+
+        setFormState(true);
+      }
+
+      abort.onclick = function (evt) {
+        evt.preventDefault();
+        abortSignal = true;
+      };
+
+      testform.onsubmit = function (evt) {
+        evt.preventDefault();
+        buildtestlist()
+        runtests(ondone);
+      };
+
+      buildtestlist();
+
+      if (qs.autorun == '1') {
+        setTimeout(function () {
+          buildtestlist()
+          runtests(ondone);
+        }, 500);
+      }
+    }());
+
+    </script>
+  </body>
+</html>
