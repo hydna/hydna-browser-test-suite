@@ -1,4 +1,4 @@
-
+#! /usr/bin/node
 var statSync                  = require('fs').statSync;
 var stat                      = require('fs').stat;
 var readdir                   = require('fs').readdir;
