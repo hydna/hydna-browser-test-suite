@@ -31,8 +31,9 @@ function getSelectedOptions (elem) {
 
   for (var i = 0; i < elem.options.length; i++) {
     if (elem.options[i].selected) {
+      console.dir(elem.options[i]);
       result.push({
-        title: elem.options[i].innerText,
+        title: elem.options[i].innerText || elem.options[i].innerHTML,
         value: elem.options[i].value
       });
     }
