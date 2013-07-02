@@ -52,7 +52,6 @@ test.run(function (doneCallback) {
 
   chan.onerror = function(exception) {
     if (/Connection\sreset/.test(exception.message) == false) {
-      console.log("HERE!");
       return test.error(new Error("not equal", exception.message));
     }
     errorraised = true;
