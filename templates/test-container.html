@@ -67,7 +67,7 @@
             timeoutMultiplier = parseFloat(qs.timeout_multiplier);
           }
 
-          if (qs.transport == 'flash') {
+          if (qs.transport == 'flash' || qs.transport == 'comet') {
             timeoutMultiplier = timeoutMultiplier * 4;
           }
 
