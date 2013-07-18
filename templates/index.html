@@ -591,8 +591,15 @@
         };
 
         form.onsubmit = function (evt) {
+          if (evt && evt.preventDefault) {
+            evt.preventDefault();
+          }
+          
           evt.preventDefault();
+
           dopost();
+
+          return false;
         };
 
         if (qs.autopost == '1') {
@@ -610,9 +617,12 @@
       };
 
       testform.onsubmit = function (evt) {
-        evt.preventDefault();
+        if (evt && evt.preventDefault) {
+          evt.preventDefault();
+        }
         buildtestlist()
         runtests(ondone);
+        return false;
       };
 
       checkTransports();
