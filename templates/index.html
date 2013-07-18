@@ -270,9 +270,9 @@
           <div class="control-group">
             <label for="transports">Transports</label>
             <select id="transports" multiple>
-              <option value="websocket" selected>WebSockets</option>
-              <option value="flash" selected>Flash (TCP)</option>
-              <option value="comet" selected>Comet</option>
+              <option id="transports-websocket" value="websocket" selected>WebSockets</option>
+              <option id="transports-flash" value="flash" selected>Flash (TCP)</option>
+              <option id="transports-comet" value="comet" selected>Comet</option>
             </select>
           </div>
           <div class="control-group">
@@ -350,6 +350,23 @@
 
       if ('domain' in qs) {
         domain.value = qs.domain;
+      }
+
+      function checkTransports () {
+        var parent = document.getElementById('transports');
+
+        if (!TestChannel.WEBSOCKET) {
+          parent.removeChild(document.getElementById('transports-websocket'));
+        }
+
+        if (!TestChannel.FLASH) {
+          parent.removeChild(document.getElementById('transports-flash'));
+        }
+
+        if (!TestChannel.COMET) {
+          parent.removeChild(document.getElementById('transports-comet'));
+        }
+
       }
 
       function setFormState (enabled) {
@@ -598,6 +615,7 @@
         runtests(ondone);
       };
 
+      checkTransports();
       buildtestlist();
 
       if (qs.autorun == '1') {
