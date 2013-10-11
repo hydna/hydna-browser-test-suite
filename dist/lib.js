@@ -419,7 +419,7 @@ function createFrameUtf(id, op, flag, data) {
       payload = unescape(encodeURIComponent(data));
     } else if (data instanceof ArrayBuffer ||
                data.buffer instanceof ArrayBuffer) {
-      ctype == PAYLOAD_TYPE_BINARY;
+      ctype = PAYLOAD_TYPE_BINARY;
       buffer = data.buffer || data;
       view = new Uint8Array(buffer, data.byteOffset || 0, data.byteLength);
       payload = [];
@@ -855,7 +855,10 @@ function FlashSocketInterface() {
 
 
   FlashSocket.prototype.send = function(data) {
-    FlashSocket.bridge.send(this.id, data);
+    var id = this.id;
+    nextTick(function () {
+      FlashSocket.bridge.send(id, data);
+    });
   };
 
 
@@ -1439,7 +1442,7 @@ Channel.prototype.emit = function(data) {
     throw new Error("Expected `data`");
   }
 
-  frame = createFrame(this._id, OP_SINGAL, FLAG_EMIT, data);
+  frame = createFrame(this._id, OP_SIGNAL, FLAG_EMIT, data);
 
   return this._connection.send(frame);
 };
