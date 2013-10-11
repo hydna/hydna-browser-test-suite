@@ -18,18 +18,6 @@ test.run(function (doneCallback) {
   var payloads = [];
   var count = 0;
 
-  for (var i = 0; i < 4; i++) {
-    payloads.push(test.createRandomString(64));
-    test.log('Sending "string" with prio %s', i);
-    testChannel.send(payloads[payloads.length - 1], i);
-  }
-
-  for (var i = 0; i < 4; i++) {
-    payloads.push(test.createRandomBuffer(64));
-    test.log('Sending "binary" with prio %s', i);
-    testChannel.send(payloads[payloads.length - 1], i);
-  }
-
   testChannel.onmessage = function(e) {
     var payload = payloads.shift();
 
@@ -49,6 +37,19 @@ test.run(function (doneCallback) {
       doneCallback();
     }
   };
+
+  for (var i = 0; i < 4; i++) {
+    payloads.push(test.createRandomString(64));
+    test.log('Sending "string" with prio %s', i);
+    testChannel.send(payloads[payloads.length - 1], i);
+  }
+
+  for (var i = 0; i < 4; i++) {
+    payloads.push(test.createRandomBuffer(64));
+    test.log('Sending "binary" with prio %s', i);
+    testChannel.send(payloads[payloads.length - 1], i);
+  }
+
 });
 
 test.teardown(function (teardownCallback) {
