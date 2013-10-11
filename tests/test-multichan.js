@@ -42,7 +42,7 @@ test.run(function (doneCallback) {
     channel = channels[idx];
 
     channel.onmessage = function (e) {
-      if (parseInt(e.data) != this.id) {
+      if (e.data != this.path) {
         done = true;
         return test.error(new Error('Wrong message'));
       }
@@ -51,9 +51,9 @@ test.run(function (doneCallback) {
       }
     };
 
-    test.log('Sending data to channel %s', channel.id);
+    test.log('Sending data to channel %s', channel.path);
 
-    channel.send(channel.id.toString());
+    channel.send(channel.path);
   }
 });
 
@@ -70,7 +70,7 @@ test.teardown(function (teardownCallback) {
       }
     };
 
-    test.log('Closing channel %s', channel.id);
+    test.log('Closing channel %s', channel.path);
 
     channel.close();
   }
