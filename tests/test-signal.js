@@ -3,7 +3,6 @@ if (typeof test == 'undefined') {
   alert('This script cannot be included directly.');
 }
 
-var SIGNAL_CHANNEL    = 0x112233;
 var SIGNAL_REQ        = 'ping';
 var SIGNAL_RESP       = 'pong';
 
