@@ -4,11 +4,10 @@ if (typeof test == 'undefined') {
 }
 
 var TOKEN             = 'TOKEN';
-var SIGNAL_RESP       = 'pong';
 
 var testChannel;
   
-test.name('Signal test');
+test.name('token test');
 test.timeout(5000);
 
 test.setup(function (readyCallback) {
