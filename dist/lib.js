@@ -54,6 +54,26 @@ var ALL_CHANNELS = 0;
 var MODE_RE = /^(r|read){0,1}(w|write){0,1}(?:\+){0,1}(e|emit){0,1}$/i;
 
 
+// Range 1000-1999 is compatible with WebSocket specification.
+var STATUS_NORMAL_CLOSURE = 1000;
+var STATUS_GOING_AWAY = 1001;
+var STATUS_PROTOCOL_ERROR = 1002;
+var STATUS_UNSUPPORTED_DATA = 1003;
+var STATUS_NO_STATUS_RCVD = 1005;
+var STATUS_ABNORMAL_CLOSURE = 1006;
+var STATUS_INVALID_PAYLOAD = 1007;
+var STATUS_POLICY_VIOLATION = 1008;
+var STATUS_MESSAGE_TOO_BIG = 1009;
+var STATUS_MANDATORY_EXT = 1010;
+var STATUS_INTERNAL_SERVER_ERROR = 1011;
+var STATUS_TLS_HANDSHAKE = 1015;
+
+// Range 5000-5999 is hydna specific
+var STATUS_OPEN_DENIED = 5000;
+var STATUS_SIGNAL = 5001;
+var STATUS_CHANNEL_OPEN = 5002;
+var STATUS_TRANSPORT_FAILURE = 5003;
+
 // Map native types to local scope, if exists
 var ArrayBuffer = global.ArrayBuffer;
 var WebSocket = global.WebSocket || global.MozWebSocket || void(0);
@@ -654,7 +674,13 @@ function WebSocketInterface() {
       subs.unshift("wsbin.winkprotocol.org");
     }
 
-    sock = new WebSocket(url, subs);
+    try {
+      sock = new WebSocket(url, subs);
+    } catch (e) {
+      return nextTick(function () {
+        return C(null, STATUS_TRANSPORT_FAILURE, e.message);
+      });
+    }
 
     sock.binaryType = "arraybuffer";
 
@@ -669,15 +695,18 @@ function WebSocketInterface() {
     };
 
 
-    sock.onclose = function() {
+    sock.onclose = function(event) {
+      var code = event.code || STATUS_NORMAL_CLOSURE;
+      var reason = event.reason || "Unknown reason";
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(new Error("Failed to connect to remote"));
+      return C(null, code, reason);
     };
 
 
     sock.onerror = function(err) {
+      var reason = err.message || "Failed to connect to remote";
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err);
+      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
     };
 
 
@@ -829,8 +858,11 @@ function FlashSocketInterface() {
 
   FlashSocket.onerror = function(id, err) {
     var sock;
+    var reason;
+
     if ((sock = FlashSocket.all[id])) {
-      sock.destroy(new Error(err || "unknown bridge socket error"));
+      reason = err || "Unknown bridge socket error";
+      sock.destroy(null, STATUS_TRANSPORT_FAILURE, reason);
     }
   };
 
@@ -838,7 +870,7 @@ function FlashSocketInterface() {
   FlashSocket.onclose = function(id) {
     var sock;
     if ((sock = FlashSocket.all[id]) && sock.onclose) {
-      sock.destroy();
+      sock.destroy(null, STATUS_ABNORMAL_CLOSURE, "Unknown reason");
     }
   };
 
@@ -863,11 +895,11 @@ function FlashSocketInterface() {
 
 
   FlashSocket.prototype.close = function() {
-    this.destroy();
+    this.destroy(null, STATUS_NO_STATUS_RCVD);
   };
 
 
-  FlashSocket.prototype.destroy = function(err) {
+  FlashSocket.prototype.destroy = function(err, code, reason) {
 
     if (!this.id) return;
 
@@ -879,11 +911,21 @@ function FlashSocketInterface() {
 
     this.id = null;
 
-    if (err) {
-      this.onerror && this.onerror(err);
+    if (err && this.onerror) {
+      this.onerror({
+        target: this,
+        type: "error",
+        message: typeof err == "string" ? err : err.message || "Unknown error"
+      });
     }
 
-    this.onclose && this.onclose();
+    if (this.onclose) {
+      this.onclose({
+        target: this,
+        code: code,
+        reason: reason
+      }); 
+    }
   };
 
 
@@ -895,14 +937,15 @@ function FlashSocketInterface() {
       return C(null, sock);
     };
 
-    sock.onclose = function() {
+    sock.onclose = function(event) {
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(new Error("Failed to connect to remote"));
+      return C(null, event.code, event.reason);
     };
 
     sock.onerror = function(err) {
+      var reason = err.message || "Failed to connect to remote";
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err);
+      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
     };
   };
   ret.NAME = "flash";
@@ -993,7 +1036,7 @@ function CometSocketInterface() {
     this.bridge = null;
 
     function ontimeout() {
-      self.destroy(new Error("ERR_HANDSHAKE_TIMEOUT"));
+      self.destroy(null, STATUS_TRANSPORT_FAILURE, "Handshake Timeout");
     }
 
     this.handshakeTimeout = setTimeout(ontimeout, 5000);
@@ -1034,7 +1077,7 @@ function CometSocketInterface() {
         break;
 
       case 0x02: // Error
-        this.destroy(new Error(payload || "BRIDGE_COMM_ERROR"));
+        this.destroy(null, STATUS_TRANSPORT_FAILURE, payload || "Unknown Erro");
         break;
 
       case 0x03:
@@ -1042,7 +1085,7 @@ function CometSocketInterface() {
         break;
 
       default:
-        this.destroy(new Error("BAD_OP(" + op + ")"));
+        this.destroy(null, STATUS_TRANSPORT_FAILURE, "Bad Comet op " + op);
         break;
     }
   };
@@ -1057,11 +1100,11 @@ function CometSocketInterface() {
 
 
   CometSocket.prototype.close = function() {
-    this.destroy();
+    this.destroy(null, STATUS_NO_STATUS_RCVD);
   };
 
 
-  CometSocket.prototype.destroy = function(err) {
+  CometSocket.prototype.destroy = function(err, code, reason) {
     var elem;
 
     if (!this.id) return;
@@ -1102,13 +1145,19 @@ function CometSocketInterface() {
 
     if (err) {
       this.onerror && this.onerror({
+        target: this,
         type: "error",
-        message: "COMET_" + (err.message || err),
-        target: this
+        message: "COMET_" + (err.message || err)
       });
     }
 
-    this.onclose && this.onclose();
+    if (this.onclose) {
+       this.onclose({
+         target: this,
+         code: code,
+         reason: reason
+       }); 
+    }
   };
 
   ret = function(url, C) {
@@ -1119,14 +1168,15 @@ function CometSocketInterface() {
       return C(null, sock);
     };
 
-    sock.onclose = function() {
+    sock.onclose = function(event) {
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(new Error("Failed to connect to remote"));
+      return C(null, event.code, event.reason);
     };
 
     sock.onerror = function(err) {
+      var reason = err.message || "Failed to connect to remote";
       sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err);
+      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
     };
   };
   ret.NAME = "comet";
@@ -1269,6 +1319,7 @@ SignalEvent.prototype.type = "signal";
 function ErrorEvent(target, data) {
   this.target = target;
   this.data = data;
+  this.message = data;
   if (typeof data == "string") {
     this.message = data;
   } else {
@@ -1280,13 +1331,20 @@ ErrorEvent.prototype.type = "error";
 
 
 
-function CloseEvent(target, data) {
+function CloseEvent(target, code, reason, hadError) {
   this.target = target;
-  this.data = data;
+
+  this.wasClean = code == STATUS_NORMAL_CLOSURE;
+  this.wasDenied = code == STATUS_OPEN_DENIED;
+  this.hadError = hadError;
+
+  this.code = code;
+  this.reason = reason || "";
+  this.data = reason;
+  
 }
 
 CloseEvent.prototype.type = "close";
-
 function Channel(url, mode) {
   this._id = null;
 
@@ -1378,7 +1436,7 @@ Channel.prototype.connect = function(url, mode) {
     throw new Error("Invalid mode");
   }
 
-  if (url.query) {
+  if (parsedUrl.query) {
     token = decodeURIComponent(parsedUrl.query);
   }
 
@@ -1466,7 +1524,7 @@ Channel.prototype.close = function(data) {
 };
 
 
-Channel.prototype._destroy = function(err) {
+Channel.prototype._destroy = function() {
   var frame;
 
   if (this.destroyed || this._closing || !this.path) {
@@ -1474,7 +1532,7 @@ Channel.prototype._destroy = function(err) {
   }
 
   if (!this._connection) {
-    finalizeDestroyChannel(this);
+    finalizeDestroyChannel(this, null, STATUS_NORMAL_CLOSURE);
     return;
   }
 
@@ -1490,7 +1548,7 @@ Channel.prototype._destroy = function(err) {
   if (this._request && !this._endsig &&
       this._request.cancel()) {
     this._request = null;
-    finalizeDestroyChannel(this, err);
+    finalizeDestroyChannel(this, null, STATUS_NORMAL_CLOSURE);
     return;
   }
 
@@ -1534,7 +1592,7 @@ Channel.prototype._open = function(payload, id, path) {
 };
 
 
-function finalizeDestroyChannel(chan, err, message) {
+function finalizeDestroyChannel(chan, err, code, message) {
   var id = chan._id;
   var path = chan.path;
   var event;
@@ -1578,7 +1636,7 @@ function finalizeDestroyChannel(chan, err, message) {
 
   try {
     if (chan.onclose) {
-      event = new CloseEvent(chan, message || null);
+      event = new CloseEvent(chan, code,  message || null, !!(err));
       chan.onclose(event);
     }
   } catch (err) {
@@ -1697,7 +1755,7 @@ OpenRequest.prototype.cancel = function() {
 };
 
 
-OpenRequest.prototype.destroy = function(err, message) {
+OpenRequest.prototype.destroy = function(err, code, reason) {
   var conn;
 
   if (!this.destroyed) {
@@ -1708,24 +1766,26 @@ OpenRequest.prototype.destroy = function(err, message) {
         conn.setDisposed(true);
       }
     }
-    this.onclose && this.onclose(err, message);
+    if (code && this.onclose) {
+      this.onclose(err, code, reason);
+    }
     this.destroyed = true;
   }
 };
 
 
 // Destroy this OpenRequest and all other in chain
-OpenRequest.prototype.destroyAndNext = function(err) {
+OpenRequest.prototype.destroyAndNext = function(err, code, reason) {
   if (this.next) {
-    this.next.destroyAndNext(err);
+    this.next.destroyAndNext(err, code, reason);
   }
-  this.destroy(err);
+  this.destroy(err, code, reason);
 }
 
 
 OpenRequest.prototype.processResolve = function(id, flag, path) {
   if (flag != OpenRequest.FLAG_ALLOW) {
-    this.destroy(new Error("ERR_UNABLE_TO_RESOLVE_PATH"));
+    this.destroy(null, STATUS_OPEN_DENIED, "Unable to resolve path");
     return;
   }
   
@@ -1739,10 +1799,12 @@ OpenRequest.prototype.processResponse = function(flag, payload) {
   var request;
   var err;
   var content;
+  var reason;
 
   if (this.next) {
     if (flag == OpenRequest.FLAG_ALLOW) {
-      this.next.destroyAndNext(new Error("Channel is already open"));
+      reason = "Channel is already open";
+      this.next.destroyAndNext(null, STATUS_CHANNEL_OPEN, reason);
     } else {
       this.next.prev = null;
       conn.requests[this.path] = this.next;
@@ -1755,12 +1817,12 @@ OpenRequest.prototype.processResponse = function(flag, payload) {
   switch (flag) {
 
     case OpenRequest.FLAG_ALLOW:
-      this.onresponse(payload, this.id);
+      this.onresponse(payload, this.id, this.path);
       this.destroy();
       break;
 
     default:
-      this.destroy(new Error(payload || "ERR_OPEN_DENIED"));
+      this.destroy(null, STATUS_OPEN_DENIED, payload);
       break;
   }
 };
@@ -1864,19 +1926,20 @@ Connection.prototype.open = function(chan, path, mode, token) {
 
   if ((oldchan = channelsByPath[path]) && !oldchan._closing) {
     nextTick(function() {
-      finalizeDestroyChannel(chan, new Error("Channel is already open"));
+      var reason = "Channel is already open";
+      finalizeDestroyChannel(chan, null, STATUS_CHANNEL_OPEN, reason);
     });
     return null;
   }
 
   request = new OpenRequest(self, path, mode, token);
 
-  request.onresponse = function(payload, id) {
+  request.onresponse = function(payload, id, path) {
     chan._open(payload, id, path);
   };
 
-  request.onclose = function(err) {
-    if (err) { finalizeDestroyChannel(chan, err); }
+  request.onclose = function(err, code, reason) {
+    finalizeDestroyChannel(chan, err, code, reason);
   };
 
   if (self.sock && !oldchan) {
@@ -1952,7 +2015,7 @@ Connection.prototype.send = function(frame) {
 
 
 // Destroy connection with optional Error
-Connection.prototype.destroy = function(err, message) {
+Connection.prototype.destroy = function(err, code, reason) {
   var id = this.id;
   var channels = this.channelsByPath;
   var requests = this.requests;
@@ -1968,13 +2031,13 @@ Connection.prototype.destroy = function(err, message) {
 
   for (var path in channels) {
     if ((chan = channels[path])) {
-      finalizeDestroyChannel(chan, err, message);
+      finalizeDestroyChannel(chan, err, code, reason);
     }
   }
 
   for (var path in this.requests) {
     if ((request = requests[path])) {
-      request.destroyAndNext(err);
+      request.destroyAndNext(err, code, reason);
     }
   }
 
@@ -2010,16 +2073,27 @@ function sockImplementation(conn, sock) {
 
   sock.onerror = function(event) {
     conn.sock = null;
-    conn.destroy(event);
+    conn.destroy(new Error(event.message || "UNKNOWN_ERROR"));
   };
 
   sock.onclose = function(event) {
-    var msg = "Connection reset by server";
-    self.sock = null;
-    if (event && event.code) {
-      msg += "(" + event.code + (event.reason ? " " + event.reason : "") + ")";
+    var reason;
+    var code;
+
+    conn.sock = null;
+
+    if (event) {
+      code = event.code || STATUS_NORMAL_CLOSURE;
+
+      if (code != STATUS_NORMAL_CLOSURE) {
+        reason = event.message || event.reason || "Connection reset by server";
+      } 
+    } else {
+      code = event.code || STATUS_ABNORMAL_CLOSURE;
+      reason = "Connection reset by server";
     }
-    conn.destroy(new Error(msg));
+
+    conn.destroy(null, code, reason);
   };
 
   sock.onopenframe = function(id, flag, payload) {
@@ -2034,7 +2108,7 @@ function sockImplementation(conn, sock) {
     }
 
     if (!request) {
-      conn.destroy(new Error("ERR_SERVER_SENT_TO_BAD_CHANNEL"));
+      conn.destroy(null, STATUS_PROTOCOL_ERROR, "Bad channel pointer");
       return;
     }
 
@@ -2093,10 +2167,10 @@ function sockImplementation(conn, sock) {
       case FLAG_ERROR:
 
         if (id === ALL_CHANNELS) {
-          if (flag != FLAG_END) {
-            conn.destroy(new Error(payload || "ERR_UNKNOWN"));
+          if (flag == FLAG_END) {
+            conn.destroy(null, STATUS_NORMAL_CLOSURE, payload);
           } else {
-            conn.destroy(null, payload);
+            conn.destroy(null, STATUS_SIGNAL, payload);
           }
           return;
         }
@@ -2115,7 +2189,7 @@ function sockImplementation(conn, sock) {
           // to the function, because channel is closed according
           // to client.
 
-          finalizeDestroyChannel(chan);
+          finalizeDestroyChannel(chan, null, STATUS_NORMAL_CLOSURE);
 
           if (requests[chan.path]) {
             // Send pending open request if exists.
@@ -2130,16 +2204,16 @@ function sockImplementation(conn, sock) {
           frame = createFrame(id, OP_SIGNAL, FLAG_END);
           conn.send(frame);
 
-          if (flag != FLAG_END) {
-            finalizeDestroyChannel(chan, new Error(payload || "ERR_UNKNOWN"));
+          if (flag == FLAG_END) {
+            finalizeDestroyChannel(chan, null, STATUS_NORMAL_CLOSURE, payload);
           } else {
-            finalizeDestroyChannel(chan, null, payload);
+            finalizeDestroyChannel(chan, null, STATUS_SIGNAL, payload);
           }
         }
         break;
 
       default:
-        conn.destroy(new Error("Server sent an unknown SIGFLAG"));
+        conn.destroy(null, STATUS_PROTOCOL_ERROR, "Unknown signal flag SIGFLAG");
         return;
     }
 
@@ -2152,7 +2226,7 @@ function sockImplementation(conn, sock) {
     var path;
 
     if (payload.length == 0) {
-      conn.destroy(new Error('Server sent a bad resolve response'));
+      conn.destroy(null, STATUS_INVALID_PAYLOAD, "Resolve payload empty");
       return;
     }
 
