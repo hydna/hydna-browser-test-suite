@@ -12,7 +12,7 @@ test.name('Signal test');
 test.timeout(5000);
 
 test.setup(function (readyCallback) {
-  testChannel = test.createRandomChannel('rw+e');
+  testChannel = test.createChannel('ping-back', 'rw+e');
   test.log('Waiting for channel to open');
   testChannel.onopen = readyCallback;
 });
