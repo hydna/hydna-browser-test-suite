@@ -141,6 +141,7 @@
 
 
           function runphases () {
+            var args = Array.prototype.slice.call(arguments, 0);
             switch (true) {
 
               case state == 'initialize' && !(channelConstructorName in window):
@@ -160,12 +161,16 @@
               state = 'run';
               root.log('Setup test "%s"...', root.name());
               starttime = (new Date()).getTime();
-              return runphases();
+              return runphases.apply(null, args);
 
               case state == 'run' && testCallbacks.length > 0:
               setTimeout(function () {
+                var callback;
+                var callbackArgs;
                 try {
-                  testCallbacks.shift()(runphases);
+                  callback = testCallbacks.shift();
+                  callbackArgs = [runphases].concat(args.slice(0));
+                  callback.apply(null, callbackArgs);
                 } catch (err) {                
                   root.error(err);
                 }
