@@ -1,0 +1,18 @@
+Hydna Browser Test Suite
+========================
+
+Visit online at http://testsuite.hydna.com/
+
+NOTE: The domain needs to run the behaviors specified in the "./test-behaviors.be"-file.
+
+
+Installing and running
+----------------------
+
+1) Run `npm install`
+
+2) Start a redis-server at localhost
+
+3) Run `node server.js`
+
+4) Connect your browser to "http://localhost:8080/"
