@@ -57,9 +57,13 @@ test.run(function (doneCallback) {
     errorraised = true;
   };
 
-  chan.onclose = function() {
-    if (!errorraised) return test.error(new Error("Error not raised"));
-    if (this._connection !== null) return test.error(new Error("connection not null"));
+  chan.onclose = function(event) {
+    if (!event || event.code != 1005) {
+      return test.error(new Error("Expected STATUS_NO_STATUS_RCVD"));
+    }
+    if (this._connection !== null) {
+      return test.error(new Error("connection not null"));
+    }
     doneCallback();
   };
   
