@@ -497,16 +497,16 @@
         var idx;
 
         li.className = 'running';
-        status.innerText = 'Running';
+        status.innerHTML = 'Running';
 
         function onresult (result) {
           result.id = li.getAttribute('id');
           if (result.status == 'error') {
             li.className = 'error';
-            status.innerText = result.message;
+            status.innerHTML = result.message;
           } else {
             li.className = 'success';
-            status.innerText = result.message;
+            status.innerHTML = result.message;
           }
           return C(result);
         }
