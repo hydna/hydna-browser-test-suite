@@ -30,25 +30,25 @@ test.run(function (doneCallback) {
   if (!didthrow) return test.error(new Error('did not throw'));
 
   try {
-    test.createRandomChannel(null).close();
-    test.createRandomChannel('r').close();
-    test.createRandomChannel('r+e').close();
-    test.createRandomChannel('r+emit').close();
-    test.createRandomChannel('read').close();
-    test.createRandomChannel('read+e').close();
-    test.createRandomChannel('read+emit').close();
-    test.createRandomChannel('w').close();
-    test.createRandomChannel('w+e').close();
-    test.createRandomChannel('w+emit').close();
-    test.createRandomChannel('write').close();
-    test.createRandomChannel('write+e').close();
-    test.createRandomChannel('write+emit').close();
-    test.createRandomChannel('rw').close();
-    test.createRandomChannel('rw+e').close();
-    test.createRandomChannel('rw+emit').close();
-    test.createRandomChannel('readwrite').close();
-    test.createRandomChannel('readwrite+e').close();
-    test.createRandomChannel('readwrite+emit').close();
+    test.createRandomChannel(null, true).close();
+    test.createRandomChannel('r', true).close();
+    test.createRandomChannel('r+e', true).close();
+    test.createRandomChannel('r+emit', true).close();
+    test.createRandomChannel('read', true).close();
+    test.createRandomChannel('read+e', true).close();
+    test.createRandomChannel('read+emit', true).close();
+    test.createRandomChannel('w', true).close();
+    test.createRandomChannel('w+e', true).close();
+    test.createRandomChannel('w+emit', true).close();
+    test.createRandomChannel('write', true).close();
+    test.createRandomChannel('write+e', true).close();
+    test.createRandomChannel('write+emit', true).close();
+    test.createRandomChannel('rw', true).close();
+    test.createRandomChannel('rw+e', true).close();
+    test.createRandomChannel('rw+emit', true).close();
+    test.createRandomChannel('readwrite', true).close();
+    test.createRandomChannel('readwrite+e', true).close();
+    test.createRandomChannel('readwrite+emit', true).close();
   } catch (err) {
     return test.error(err);
   }

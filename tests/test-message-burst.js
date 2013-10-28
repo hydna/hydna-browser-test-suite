@@ -27,6 +27,8 @@ test.run(function (doneCallback) {
     } else {
       if (++count == MESSSAGES_TO_SEND) {
         doneCallback();
+      } else if (count % 100 == 0) {
+        test.log('Recived %s messages of %s', count, MESSSAGES_TO_SEND);
       }
     }
   };

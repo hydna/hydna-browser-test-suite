@@ -348,7 +348,7 @@
           };
 
 
-          root.createRandomChannel = function (mode) {
+          root.createRandomChannel = function (mode, dontCaptureErrors) {
             var id = ~~(Math.random() * 0xfffffff) + 1;
             var ctor = window[channelConstructorName];
             var channel;
@@ -361,9 +361,15 @@
             root.log('Open channel "%s" (protocol: %s)', url, protocol);
 
             channel = new ctor(url, mode);
-            channel.onerror = function (err) {
-              root.error(err);
-            };
+
+            if (!dontCaptureErrors) {
+              channel.onerror = function (err) {
+                root.error(err);
+              };
+              channel.onclose = function (evt) {
+                root.error({ message: evt.reason });
+              };
+            }
 
             channels.push(channel);
 
@@ -371,7 +377,7 @@
           };
 
 
-          root.createChannel = function (id, mode) {
+          root.createChannel = function (id, mode, dontCaptureErrors) {
             var ctor = window[channelConstructorName];
             var channel;
             var protocol;
@@ -383,9 +389,15 @@
             root.log('Open channel "%s" (protocol: %s)', url, protocol);
 
             channel = new ctor(url, mode);
-            channel.onerror = function (err) {
-              root.error(err);
-            };
+
+            if (!dontCaptureErrors) {
+              channel.onerror = function (err) {
+                root.error(err);
+              };
+              channel.onclose = function (evt) {
+                root.error({ message: evt.reason });
+              };
+            }
 
             channels.push(channel);
 
