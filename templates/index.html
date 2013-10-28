@@ -588,7 +588,9 @@
         }
 
         cancel.onclick = function (evt) {
-          evt.preventDefault();
+          if (evt) {
+            evt.preventDefault();
+          }
           dialog.style.display = 'none';
         };
 
