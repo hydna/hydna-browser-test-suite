@@ -1077,6 +1077,7 @@ function CometSocketInterface() {
         break;
 
       case 0x02: // Error
+        this.bridge = null;
         this.destroy(null, STATUS_TRANSPORT_FAILURE, payload || "Unknown Erro");
         break;
 
@@ -1106,17 +1107,31 @@ function CometSocketInterface() {
 
   CometSocket.prototype.destroy = function(err, code, reason) {
     var elem;
+    var bridge;
+    var id;
 
-    if (!this.id) return;
+    if (!(id = this.id)) return;
+
+    this.id = null;
+
+    this.messageHandler = null;
+
+    delete CometSocket.all[this.id];
+    CometSocket.count--;
 
     if (this.handshakeTimeout) {
       clearTimeout(this.handshakeTimeout);
       this.handshakeTimeout = null;
     }
 
-    if (this.bridge) {
-      this.bridge.postMessage("\x02", "*");
+    if ((bridge = this.bridge)) {
       this.bridge = null;
+      nextTick(function() {
+        try {
+          bridge.postMessage("\x02", "*");
+        } catch (err) {
+        }
+      });
     }
 
     if ((elem = this.elem)) {
@@ -1128,11 +1143,6 @@ function CometSocketInterface() {
       }, 1);
     }
 
-    this.messageHandler = null;
-
-    delete CometSocket.all[this.id];
-    CometSocket.count--;
-
     if (CometSocket.count == 0) {
       if ("detachEvent" in global) {
         global.detachEvent("onmessage", messageHandler);
@@ -1140,8 +1150,6 @@ function CometSocketInterface() {
         global.removeEventListener("message", messageHandler, false);
       }
     }
-
-    this.id = null;
 
     if (err) {
       this.onerror && this.onerror({
@@ -1336,7 +1344,7 @@ function CloseEvent(target, code, reason, hadError) {
 
   this.wasClean = code == STATUS_NORMAL_CLOSURE;
   this.wasDenied = code == STATUS_OPEN_DENIED;
-  this.hadError = hadError;
+  this.hadError = !this.wasClean && !this.wasDenied;
 
   this.code = code;
   this.reason = reason || "";
@@ -1636,6 +1644,10 @@ function finalizeDestroyChannel(chan, err, code, message) {
 
   try {
     if (chan.onclose) {
+      if (!code) {
+        code = STATUS_ABNORMAL_CLOSURE;
+        message = "Connection to remote closed";
+      }
       event = new CloseEvent(chan, code,  message || null, !!(err));
       chan.onclose(event);
     }
