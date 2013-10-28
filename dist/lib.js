@@ -2073,8 +2073,12 @@ Connection.prototype.destroy = function(err, code, reason) {
   }
 
   if (this.sock) {
-    this.sock.close();
-    this.sock = null;
+    try {
+      this.sock.close();
+    } catch (err) {
+    } finally {
+      this.sock = null;
+    }
   }
 };
 
