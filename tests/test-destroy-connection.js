@@ -47,7 +47,7 @@ test.run(function (doneCallback) {
 
   chan.onopen = function() {
     test.log('Resetting connection');
-    chan._connection.sock.close();
+    chan._connection.socket.close();
   };
 
   chan.onerror = function(exception) {
