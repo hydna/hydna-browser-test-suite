@@ -83,6 +83,7 @@ function main () {
   http = createServer();
 
   http.on('request', onrequest);
+  console.log('Listening on *:%s', options.port);
   http.listen(options.port);
 
 }
