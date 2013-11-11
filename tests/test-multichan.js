@@ -42,7 +42,7 @@ test.run(function (doneCallback) {
     channel = channels[idx];
 
     channel.onmessage = function (e) {
-      if (e.data != this.path) {
+      if (e.data != this.url) {
         done = true;
         return test.error(new Error('Wrong message'));
       }
@@ -51,9 +51,9 @@ test.run(function (doneCallback) {
       }
     };
 
-    test.log('Sending data to channel %s', channel.path);
+    test.log('Sending data to channel %s', channel.url);
 
-    channel.send(channel.path);
+    channel.send(channel.url);
   }
 });
 
@@ -70,7 +70,7 @@ test.teardown(function (teardownCallback) {
       }
     };
 
-    test.log('Closing channel %s', channel.path);
+    test.log('Closing channel %s', channel.url);
 
     channel.close();
   }
