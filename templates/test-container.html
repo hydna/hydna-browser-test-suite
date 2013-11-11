@@ -349,13 +349,13 @@
 
 
           root.createRandomChannel = function (mode, dontCaptureErrors) {
-            var id = ~~(Math.random() * 0xfffffff) + 1;
+            var path = ~~(Math.random() * 0xfffffff) + 1;
             var ctor = window[channelConstructorName];
             var channel;
             var protocol;
             var url;
 
-            url = root.domain + '/' + id;
+            url = root.domain + '/' + path;
 
             protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
             root.log('Open channel "%s" (protocol: %s)', url, protocol);
@@ -377,13 +377,13 @@
           };
 
 
-          root.createChannel = function (id, mode, dontCaptureErrors) {
+          root.createChannel = function (path, mode, dontCaptureErrors) {
             var ctor = window[channelConstructorName];
             var channel;
             var protocol;
             var url;
 
-            url = root.domain + '/' + id;
+            url = root.domain + '/' + path;
 
             protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
             root.log('Open channel "%s" (protocol: %s)', url, protocol);
