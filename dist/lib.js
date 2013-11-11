@@ -21,9 +21,6 @@ var DISABLE_COMET=false;
     - VERSION (string)
 */
 
-var SUPPORTED = true;
-var AB_TRANSPORT_SUPPORT = false;
-
 var PAYLOAD_MAX_SIZE = 0xfff8;
 var BFRAME_MAX_SIZE = 0xfffd;
 var UFRAME_MAX_SIZE = 0x15553;
@@ -43,10 +40,11 @@ var WRITE = 0x02;
 var READWRITE = 0x03;
 var EMIT = 0x04;
 
-
-// Signal flags
+// flags
+var FLAG_ALLOW = 0x0;
 var FLAG_EMIT = 0x0;
 var FLAG_END = 0x1;
+var FLAG_DENY = 0x7;
 var FLAG_ERROR = 0x7;
 
 var ALL_CHANNELS = 0;
@@ -75,28 +73,53 @@ var STATUS_CHANNEL_OPEN = 5002;
 var STATUS_TRANSPORT_FAILURE = 5003;
 
 // Map native types to local scope, if exists
-var ArrayBuffer = global.ArrayBuffer;
-var WebSocket = global.WebSocket || global.MozWebSocket || void(0);
-var btoa = global.btoa;
-var atob = global.atob;
 var encodeURIComponent = global.encodeURIComponent;
 var decodeURIComponent = global.decodeURIComponent;
 var escape = global.escape;
 var unescape = global.unescape;
 
-
-// Predefined local varibales. They are mapped in
-// the `detection` process.
-var SocketInterface = null;
-var createFrame = null;
+// Check if the browser supports ArrayBuffers's. If not,
+// use Arrays instead.
+var ArrayBuffer = global.ArrayBuffer;
 var atobin = null;
 
-if (OBJECT_NAME in global) {
-  throw new Error("Target name already taken, or is library already loaded");
+if (ArrayBuffer == undefined) {
+  ArrayBuffer = function() {};
+  atobin = atoarr;
+} else {
+  atobin = atoab;
 }
 
-global[OBJECT_NAME] = Channel;
+var createFrame = null;
 
+var uniqueId = (function () {
+  var incr = 1;
+  return function (asString) {
+    var id = incr++;
+    if (!asString) {
+      return id;
+    }
+    id = incr.toString(16);
+    while (id.length < 8) id = 0 + id;
+    return id;
+  };
+}());
+
+
+var time = Date.now || (function () {
+  return (new Date()).getTime();
+});
+
+var EXPORTS = (function () {
+  switch (true) {
+    case typeof module !== "undefined" &&
+         typeof module.exports !== "undefined":
+    return "common";
+    case typeof define === "function" && !!define.amd:
+    return "amd";
+  }
+  return "global";  
+}());
 /*
  * Copyright (c) 2010 Nick Galbreath
  * http://code.google.com/p/stringencoders/source/browse/#svn/trunk/javascript
@@ -251,6 +274,10 @@ base64.encode = function(s) {
     }
     return x.join('');
 }
+
+// Use base64 lib if not natively supported
+var btoa = global.btoa || base64.encode;
+var atob = global.atob || base64.decode;
 var nextTick = null;
 if (typeof setImmediate != "undefined") {
   nextTick = setImmediate;
@@ -284,7 +311,6 @@ if (typeof setImmediate != "undefined") {
 } else {
   nextTick = function(C) { setTimeout(C, 0); };
 }
-
 // parserUri
 // Based on Steve Levithan's parseUri
 // (c) Steven Levithan <stevenlevithan.com>
@@ -305,16 +331,11 @@ var parseUri = (function() {
       uri.authority = authority.substr(i + 1);
     }
 
-    uri.addr = uri.authority + "/";
-
-    if (uri.userInfo) {
-      uri.addr += encodeURIComponent(uri.userInfo);
-    }
+    uri.path = uri.path || '/';
 
   	return uri;
   };
 })();
-
 
 var FLAG_BITMASK = 0x7;
 
@@ -359,7 +380,7 @@ function atoab(a) {
 
 
 // Create a binary frame
-function createFrameBin(id, op, flag, data) {
+function createFrameBin(ptr, op, flag, data) {
   var poff = 0;
   var plen = 0;
   var chars;
@@ -409,10 +430,10 @@ function createFrameBin(id, op, flag, data) {
   frame = new ArrayBuffer(5 + plen);
 
   view = new Uint8Array(frame)
-  view[0] = id >>> 24 & 0xff;
-  view[1] = id >>> 16 & 0xff;
-  view[2] = id >>> 8 & 0xff;
-  view[3] = id % 256;
+  view[0] = ptr >>> 24 & 0xff;
+  view[1] = ptr >>> 16 & 0xff;
+  view[2] = ptr >>> 8 & 0xff;
+  view[3] = ptr % 256;
   view[4] = (ctype << CTYPE_BITPOS) | (op << OP_BITPOS) | flag;
 
   if (plen) {
@@ -423,7 +444,7 @@ function createFrameBin(id, op, flag, data) {
 }
 
 // Creates an UTF frame
-function createFrameUtf(id, op, flag, data) {
+function createFrameUtf(ptr, op, flag, data) {
   var buffer;
   var frame;
   var view;
@@ -459,10 +480,10 @@ function createFrameUtf(id, op, flag, data) {
   }
 
   frame = new Array();
-  frame[0] = String.fromCharCode((id >>> 24) & 0xff);
-  frame[1] = String.fromCharCode((id >>> 16) & 0xff);
-  frame[2] = String.fromCharCode((id >>> 8) & 0xff);
-  frame[3] = String.fromCharCode(id & 0xff);
+  frame[0] = String.fromCharCode((ptr >>> 24) & 0xff);
+  frame[1] = String.fromCharCode((ptr >>> 16) & 0xff);
+  frame[2] = String.fromCharCode((ptr >>> 8) & 0xff);
+  frame[3] = String.fromCharCode(ptr & 0xff);
   frame[4] = String.fromCharCode((ctype << CTYPE_BITPOS) |
                                  (op << OP_BITPOS) |
                                   flag);
@@ -500,7 +521,7 @@ function getsize(data) {
 
 // Binary message parser
 function sockMessageBinImpl(event) {
-  var ch;
+  var ptr;
   var ctype;
   var op;
   var flag;
@@ -509,18 +530,18 @@ function sockMessageBinImpl(event) {
   var tmp;
 
   if ((data = event.data) instanceof ArrayBuffer == false) {
-    return this.destroy(new Error("ERR_UNSUPPORTED_TYPE"));
+    return this.close(null, STATUS_PROTOCOL_ERROR, "ERR_UNSUPPORTED_TYPE");
   }
 
   if (event.data.byteLength < 5) {
-    return this.destroy(new Error("ERR_BAD_HEADER_SIZE"));
+    return this.close(null, STATUS_PROTOCOL_ERROR, "ERR_BAD_HEADER_SIZE");
   }
 
   data = new Uint8Array(event.data);
 
-  ch = (data[1] << 16 |
-        data[2] << 8 |
-        data[3]) + (data[0] << 24 >>> 0);
+  ptr = (data[1] << 16 |
+         data[2] << 8 |
+         data[3]) + (data[0] << 24 >>> 0);
 
   desc = data[4];
 
@@ -538,40 +559,20 @@ function sockMessageBinImpl(event) {
         payload = tmp.buffer;
       }
     } catch (err) {
-      return this.destroy(new Error("ENCODING_ERR"));
+      return this.close(null, STATUS_PROTOCOL_ERROR, "ENCODING_ERR");
     }
   }
 
-  switch (op) {
-
-    case OP_HEARTBEAT:
-      break;
-
-    case OP_OPEN:
-      this.onopenframe(ch, flag, payload);
-      break;
-
-    case OP_DATA:
-      this.ondataframe(ch, flag, payload);
-      break;
-
-    case OP_SIGNAL:
-      this.onsignalframe(ch, flag, payload);
-      break;
-
-    case OP_RESOLVE:
-      this.onresolveframe(ch, flag, payload);
-      break;
+  if (this.onframe) {
+    this.onframe(ptr, op, flag, payload);
   }
 }
-
-
 
 
 // Utf message parser implementation
 function sockMessageUtfImpl(event) {
   var data = event.data;
-  var ch;
+  var ptr;
   var op;
   var flag;
   var ctype;
@@ -579,22 +580,22 @@ function sockMessageUtfImpl(event) {
   var desc;
 
   if (!data || !data.length) {
-    return this.destroy(new Error("ERR_UNSUPPORTED_TYPE"));
+    return this.close(null, STATUS_PROTOCOL_ERROR, "ERR_UNSUPPORTED_TYPE");
   }
 
   if (data.length < 8) {
-    return this.destroy(new Error("BAD_HEADER_SIZE_ERR"));
+    return this.close(null, STATUS_PROTOCOL_ERROR, "BAD_HEADER_SIZE_ERR");
   }
 
   try {
     data = atob(data);
   } catch (err) {
-    return this.destroy(new Error("ENCODING_ERR"));
+    return this.close(null, STATUS_PROTOCOL_ERROR, "ENCODING_ERR");
   }
 
-  ch = (data.charCodeAt(1) << 16 |
-        data.charCodeAt(2) << 8 |
-        data.charCodeAt(3)) + (data.charCodeAt(0) << 24 >>> 0);
+  ptr = (data.charCodeAt(1) << 16 |
+         data.charCodeAt(2) << 8 |
+         data.charCodeAt(3)) + (data.charCodeAt(0) << 24 >>> 0);
 
   desc = data.charCodeAt(4);
 
@@ -607,34 +608,16 @@ function sockMessageUtfImpl(event) {
       if (ctype == PAYLOAD_TYPE_TEXT) {
         payload = decodeURIComponent(escape(data.substr(5)));
       } else {
+        // TODO: Convert to ArrayBuffer if possible
         payload = atobin(data.substr(5));
       }
     } catch (err) {
-      return this.destroy(new Error("ENCODING_ERR"));
+      return this.close(null, STATUS_PROTOCOL_ERROR, "ENCODING_ERR");
     }
   }
 
-  switch (op) {
-
-    case OP_HEARTBEAT:
-      break;
-
-    case OP_OPEN:
-      this.onopenframe(ch, flag, payload);
-      break;
-
-    case OP_DATA:
-      this.ondataframe(ch, flag, payload);
-      break;
-
-    case OP_SIGNAL:
-      this.onsignalframe(ch, flag, payload);
-      break;
-
-    case OP_RESOLVE:
-      this.onresolveframe(ch, flag, payload);
-      break;
-
+  if (this.onframe) {
+    this.onframe(ptr, op, flag, payload);
   }
 }
 
@@ -659,646 +642,29 @@ function getBinMode(modeExpr) {
 
   return result;
 }
-function WebSocketInterface() {
-  var ret;
-
-  ret = function(url, C) {
-    var subs;
-    var sock;
-
-    url = url.protocol == "http" ? "ws://" + url.addr : "wss://" + url.addr;
-
-    subs = ["wsutf.winkprotocol.org"];
-
-    if (AB_TRANSPORT_SUPPORT) {
-      subs.unshift("wsbin.winkprotocol.org");
-    }
-
-    try {
-      sock = new WebSocket(url, subs);
-    } catch (e) {
-      return nextTick(function () {
-        return C(null, STATUS_TRANSPORT_FAILURE, e.message);
-      });
-    }
-
-    sock.binaryType = "arraybuffer";
-
-    sock._destroyed = false;
-
-    sock.onmessage = AB_TRANSPORT_SUPPORT ? sockMessageBinImpl
-                                          : sockMessageUtfImpl;
-
-    sock.onopen = function() {
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, sock);
-    };
 
 
-    sock.onclose = function(event) {
-      var code = event.code || STATUS_NORMAL_CLOSURE;
-      var reason = event.reason || "Unknown reason";
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, code, reason);
-    };
+function cloneData(data) {
+  var clone;
+  var buffer;
 
-
-    sock.onerror = function(err) {
-      var reason = err.message || "Failed to connect to remote";
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
-    };
-
-
-    sock.destroy = function(err) {
-
-      if (this._destroyed) {
-        return;
-      }
-
-      this._destroyed = true;
-
-      if (err) {
-        this.onerror && this.onerror(err);
-      }
-
-      this.close();
-    };
-
-  };
-  ret.NAME = "websocket";
-  return ret;
-}
-function FlashSocketInterface() {
-  var exports = { onhandshake: 1, onready: 1, onopen: 1,
-                  onclose: 1, onerror: 1, onmessage: 1 };
-  var ret;
-
-  function FlashSocket(url) {
-    this.id = FlashSocket.incr++;
-    this.url = url;
-    this.connected = false;
-    FlashSocket.all[this.id] = this;
-    if (!FlashSocket.bridge) return FlashSocket.embed();
-    url = url.protocol + "://" + url.addr;
-    if (FlashSocket.flashready) FlashSocket.bridge.init(this.id, url);
+  if (!data || typeof data == "string") {
+    return data;
   }
 
-  Channel.__bridge = FlashSocket;
-
-  FlashSocket.all = {};
-  FlashSocket.incr = 1;
-  FlashSocket.flashready = false;
-  FlashSocket.bridge = null;
-
-  FlashSocket.embed = function() {
-    var body = document.getElementsByTagName('body')[0];
-    var str = [];
-    var vars = [];
-    var flashid;
-    var codebase;
-    var pluginpage;
-    var path;
-    var bridge;
-    var tmpl;
-    var id;
-
-    // Both `name` and `id` is required by internet explorer. We 
-    // use current tick to generate an unqiue ID.
-    id = "__" + (new Date()).getTime();
-
-    for (var key in exports) {
-      vars.push(key + "=" + OBJECT_NAME + ".__bridge." + key);
-    }
-
-    codebase = "http://fpdownload.macromedia.com/pub/shockwave/cabs/"
-               "flash/swflash.cab#version=9,0,0,0";
-
-    pluginpage = "http://www.macromedia.com/go/getflashplayer";
-
-    path = FLASH_PATH + "?" + (Math.random() * 0xFFFFFFFF);
-
-    str[0 ] = '<object name="' + id + '" id="' + id + '"' +
-              ' classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' +
-              ' codebase="' +  codebase + '" name=' +
-              ' width="1" height="1">';
-    str[1 ] = '<param name="allowScriptAccess" value="always"></param>';
-    str[2 ] = '<param name="allowNetworking" value="true"></param>';
-    str[3 ] = '<param name="movie" value="' + path + '"></param>';
-    str[4 ] = '<param name="quality" value="low"></param>';
-    str[5 ] = '<param name="menu" value="false"></param>';
-    str[6 ] = '<param name="FlashVars" value="' + vars.join("&") + '">';
-    str[7 ] = '</param><param name="bgcolor" value="#ffffff"></param>';
-    str[8 ] = '<param name="wmode" value="transparent"></param>';
-    str[9 ] = '<embed  src="' + path + '" quality="low" bgcolor="#ffffff"' +
-              ' wmode="transparent" width="1" height="1"' +
-              ' swLiveConnect="true" allowScriptAccess="always"' +
-              ' allowNetworking="true" menu="false"' +
-              ' type="application/x-shockwave-flash"' +
-              ' FlashVars="' + vars.join("&") + '"' +
-              ' pluginspage="' + pluginpage + '">';
-    str[10] = '</object>';
-
-    tmpl = document.createElement("div");
-    tmpl.innerHTML = str.join("");
-    bridge = tmpl.childNodes[0];
-
-    if (!global.document.all) {
-      for (var i = 0; i < bridge.childNodes.length; i++) {
-        if (bridge.childNodes[i].nodeName.toUpperCase() == "EMBED") {
-          bridge = bridge.childNodes[i];
-          break;
-        }
-      }
-    }
-
-    bridge.style.position = "absolute";
-    bridge.style.top = "0px";
-    bridge.style.left = "0px";
-    bridge.style.width = "1px";
-    bridge.style.height = "1px";
-    bridge.style.zIndex = "-100000";
-
-    body.appendChild(bridge);
-
-    FlashSocket.bridge = bridge;
-  };
-
-
-  FlashSocket.onhandshake = function() {
-    return typeof navigator !== "undefined" && navigator.userAgent || "none";
-  };
-
-
-  FlashSocket.onready = function() {
-    nextTick(function() {
-      var all = FlashSocket.all;
-      var url;
-
-      FlashSocket.flashready = true;
-
-      for (var id in all) {
-        url = all[id].url.protocol + "://" + all[id].url.addr;
-        FlashSocket.bridge.init(all[id].id, url);
-      }
-
-    });
-    return true;
-  };
-
-
-  FlashSocket.onopen = function(id) {
-    var sock;
-    if ((sock = FlashSocket.all[id]) && sock.onopen) {
-      sock.connected = true;
-      sock.onopen();
-    }
-  };
-
-
-  FlashSocket.onerror = function(id, err) {
-    var sock;
-    var reason;
-
-    if ((sock = FlashSocket.all[id])) {
-      reason = err || "Unknown bridge socket error";
-      sock.destroy(null, STATUS_TRANSPORT_FAILURE, reason);
-    }
-  };
-
-
-  FlashSocket.onclose = function(id) {
-    var sock;
-    if ((sock = FlashSocket.all[id]) && sock.onclose) {
-      sock.destroy(null, STATUS_ABNORMAL_CLOSURE, "Unknown reason");
-    }
-  };
-
-
-  FlashSocket.onmessage = function(id, data) {
-    var sock;
-    if ((sock = FlashSocket.all[id])) {
-      sock.onmessage({ data: data });
-    }
-  };
-
-
-  FlashSocket.prototype.onmessage = sockMessageUtfImpl;
-
-
-  FlashSocket.prototype.send = function(data) {
-    var id = this.id;
-    nextTick(function () {
-      FlashSocket.bridge.send(id, data);
-    });
-  };
-
-
-  FlashSocket.prototype.close = function() {
-    this.destroy(null, STATUS_NO_STATUS_RCVD);
-  };
-
-
-  FlashSocket.prototype.destroy = function(err, code, reason) {
-
-    if (!this.id) return;
-
-    if (this.connected) {
-      FlashSocket.bridge.close(this.id);
-    }
-
-    delete FlashSocket.all[this.id];
-
-    this.id = null;
-
-    if (err && this.onerror) {
-      this.onerror({
-        target: this,
-        type: "error",
-        message: typeof err == "string" ? err : err.message || "Unknown error"
-      });
-    }
-
-    if (this.onclose) {
-      this.onclose({
-        target: this,
-        code: code,
-        reason: reason
-      }); 
-    }
-  };
-
-
-  ret = function (url, C) {
-    var sock = new FlashSocket(url);
-
-    sock.onopen = function() {
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, sock);
-    };
-
-    sock.onclose = function(event) {
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, event.code, event.reason);
-    };
-
-    sock.onerror = function(err) {
-      var reason = err.message || "Failed to connect to remote";
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
-    };
-  };
-  ret.NAME = "flash";
-  return ret;
-}
-function CometSocketInterface() {
-  var idprefix = "__" + OBJECT_NAME.toLowerCase() + "__"
-  var idsuffix = "__bridge__";
-  var origin = global.location.origin;
-  var ret;
-
-  origin = origin || (function() {
-    var l = global.location;
-    return l.protocol == "file:" ?
-            "file://" :
-            l.protocol + "://" + l.hostname;
-  })();
-
-  // Global message handler for all incomming
-  // messages. We filter out the underlying FlashSocket
-  // by checking the origin.
-  function messageHandler(event) {
-    var id;
-    var sock;
-
-    if (event.source == global ||
-        typeof event.data != "string" ||
-        event.data.length < 8) {
-      return;
-    }
-
-    id = event.data.substr(0, 8);
-
-    if (!(sock = CometSocket.all[id]) ||
-        !sock.messageHandler) {
-      return;
-    }
-
-    sock.messageHandler(event);
+  if (typeof data.slice == 'function') {
+    return data.slice(0);
   }
 
+  buffer = new Uint8Array(data);
+  clone = new Uint8Array(buffer.length);
 
-  function CometSocket(url) {
-    var self = this;
-    var body = document.getElementsByTagName('body')[0];
-    var token;
-    var id;
-    var src;
-    var target;
-
-    id = (CometSocket.incr++).toString(16);
-    while (id.length < 8) id = 0 + id;
-
-    this.id = id;
-
-    token = url.query || "";
-
-    src = url.protocol +
-          "://" +
-          url.authority +
-          COMET_PATH +
-          "?origin=" + origin;
-
-    this.elem = document.createElement('iframe');
-    this.elem.setAttribute("id", idprefix + this.id + idsuffix);
-
-    this.elem.style.width = "0px";
-    this.elem.style.height = "0px";
-    this.elem.style.visibility = "hidden";
-
-    this.elem.src = src;
-
-    function onload() {
-      var b = document.getElementById(idprefix + id + idsuffix);
-      self.bridge = b.contentWindow;
-      self.bridge.postMessage(id + token, "*");
-    }
-
-    if ('addEventListener' in this.elem) {
-        this.elem.addEventListener("load", onload, false);
-    } else if ('attachEvent' in this.elem) {
-        this.elem.attachEvent("onload", onload);
-    } else {
-        this.elem.onload = onload;
-    }
-
-    this.connected = false;
-    this.bridge = null;
-
-    function ontimeout() {
-      self.destroy(null, STATUS_TRANSPORT_FAILURE, "Handshake Timeout");
-    }
-
-    this.handshakeTimeout = setTimeout(ontimeout, 5000);
-
-    CometSocket.all[this.id] = this;
-    CometSocket.count++;
-
-    // Initialize the global message handler if this is the
-    // first Socket that is being added.
-    if (CometSocket.count == 1) {
-      if ("attachEvent" in global) {
-        global.attachEvent("onmessage", messageHandler);
-      } else {
-        global.addEventListener("message", messageHandler, false);
-      }
-    }
-
-    body.appendChild(this.elem);
+  for (var i = 0, l = buffer.length; i < l; i++) {
+    clone[i] = buffer[i];
   }
 
-
-  CometSocket.all = {};
-  CometSocket.incr = 1;
-  CometSocket.count = 0;
-
-
-  CometSocket.prototype.messageHandler = function(event) {
-    var op = event.data.charCodeAt(8);
-    var payload = event.data.length > 8 ? event.data.substr(9) : null;
-
-    switch (op) {
-
-      case 0x01: // Handshake
-        clearTimeout(this.handshakeTimeout);
-        this.handshakeTimeout = null;
-        this.connected = true;
-        this.onopen();
-        break;
-
-      case 0x02: // Error
-        this.bridge = null;
-        this.destroy(null, STATUS_TRANSPORT_FAILURE, payload || "Unknown Erro");
-        break;
-
-      case 0x03:
-        this.onmessage({ data: payload });
-        break;
-
-      default:
-        this.destroy(null, STATUS_TRANSPORT_FAILURE, "Bad Comet op " + op);
-        break;
-    }
-  };
-
-
-  CometSocket.prototype.onmessage = sockMessageUtfImpl;
-
-
-  CometSocket.prototype.send = function(data) {
-    this.bridge.postMessage("\x03" + data, "*");
-  };
-
-
-  CometSocket.prototype.close = function() {
-    this.destroy(null, STATUS_NO_STATUS_RCVD);
-  };
-
-
-  CometSocket.prototype.destroy = function(err, code, reason) {
-    var elem;
-    var bridge;
-    var id;
-
-    if (!(id = this.id)) return;
-
-    this.id = null;
-
-    this.messageHandler = null;
-
-    delete CometSocket.all[this.id];
-    CometSocket.count--;
-
-    if (this.handshakeTimeout) {
-      clearTimeout(this.handshakeTimeout);
-      this.handshakeTimeout = null;
-    }
-
-    if ((bridge = this.bridge)) {
-      this.bridge = null;
-      nextTick(function() {
-        try {
-          bridge.postMessage("\x02", "*");
-        } catch (err) {
-        }
-      });
-    }
-
-    if ((elem = this.elem)) {
-      this.elem = null;
-      elem.onload = null;
-      setTimeout(function () {
-        var body = document.getElementsByTagName('body')[0];
-        try { body.removeChild(elem); } catch (err) { }
-      }, 1);
-    }
-
-    if (CometSocket.count == 0) {
-      if ("detachEvent" in global) {
-        global.detachEvent("onmessage", messageHandler);
-      } else {
-        global.removeEventListener("message", messageHandler, false);
-      }
-    }
-
-    if (err) {
-      this.onerror && this.onerror({
-        target: this,
-        type: "error",
-        message: "COMET_" + (err.message || err)
-      });
-    }
-
-    if (this.onclose) {
-       this.onclose({
-         target: this,
-         code: code,
-         reason: reason
-       }); 
-    }
-  };
-
-  ret = function(url, C) {
-    var sock = new CometSocket(url);
-
-    sock.onopen = function() {
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, sock);
-    };
-
-    sock.onclose = function(event) {
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(null, event.code, event.reason);
-    };
-
-    sock.onerror = function(err) {
-      var reason = err.message || "Failed to connect to remote";
-      sock.onopen = sock.onclose = sock.onerror = null;
-      return C(err, STATUS_ABNORMAL_CLOSURE, reason);
-    };
-  };
-  ret.NAME = "comet";
-  return ret;
+  return clone;
 }
-
-function hasFlashSupport() {
-  var nav = global.navigator;
-  var mkey = "application/x-shockwave-flash";
-  var ActiveX;
-  var mimes;
-  var major;
-  var plugin;
-
-  if (typeof FlashSocketInterface == "undefined" || !nav) {
-    return false;
-  }
-
-  if ((/android/i).test(nav.userAgent)) {
-    return false;
-  }
-
-  if (typeof nav.plugins != "undefined" &&
-      (plugin = nav.plugins["Shockwave Flash"]) &&
-      plugin.description &&
-      ((mime = nav.mimeTypes) && mime[mkey] && mime[mkey].enabledPlugin)) {
-    major = /\s(\d+)/.exec(plugin.description);
-    return major[1] && (parseInt(major[1]) > 9);
-  } else if ((ActiveX = global.ActiveXObject)) {
-    try {
-      if ((plugin = new ActiveX("ShockwaveFlash.ShockwaveFlash"))) {
-        major = /\s(\d+)/.exec(plugin.GetVariable("$version"));
-        return major[1] && (parseInt(major[1]) > 9);
-      }
-    } catch(e) {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-function hasWSSupport() {
-  return typeof WebSocketInterface != "undefined" &&
-         typeof WebSocket != "undefined"
-}
-
-
-function hasCometSupport() {
-  return typeof CometSocketInterface != "undefined" &&
-         typeof global.postMessage != "undefined";
-}
-
-
-// Check if the browser supports ArrayBuffers's. If not,
-// use Arrays instead.
-if (ArrayBuffer == undefined) {
-  ArrayBuffer = function() {};
-  atobin = atoarr;
-} else {
-  atobin = atoab;
-}
-
-
-// Use base64 lib if not natively supported
-btoa = btoa || base64.encode;
-atob = atob || base64.decode;
-
-
-// Detect if we can use ArrayBuffers in transport
-AB_TRANSPORT_SUPPORT = WebSocket && "binaryType" in WebSocket.prototype;
-
-// Test if we support binary in Chrome. This is awful, but the only
-// way that is working right now.
-if (WebSocket && !AB_TRANSPORT_SUPPORT && /Chrome/.test(navigator.userAgent)) {
-  (function() {
-    var m = /Chrome\/(\d+)/.exec(navigator.userAgent);
-    if (m && parseInt(m[1]) >= 15) AB_TRANSPORT_SUPPORT = true;
-  })();
-}
-
-
-switch (global.__FORCE_TRANSPORT_SOCKET__) {
-  case "websocket":
-    hasWSSupport() && (SocketInterface = WebSocketInterface());
-    break;
-  case "flash":
-    hasFlashSupport() && (SocketInterface = FlashSocketInterface());
-    AB_TRANSPORT_SUPPORT = false;
-    break;
-  case "comet":
-    hasCometSupport() && (SocketInterface = CometSocketInterface());
-    AB_TRANSPORT_SUPPORT = false;
-    break;
-  default:
-    // Use the best suited transport socket 
-    if (hasWSSupport()) {
-      SocketInterface = WebSocketInterface();
-    } else if (hasFlashSupport()) {
-      SocketInterface = FlashSocketInterface();
-      AB_TRANSPORT_SUPPORT = false;
-    } else if (hasCometSupport()) {
-      SocketInterface = CometSocketInterface();
-      AB_TRANSPORT_SUPPORT = false;
-    }
-    break;
-}
-
-// Set transport to `none` if not supported
-SUPPORTED = !(!SocketInterface);
-
-// Set createFrame to Binary if supported
-createFrame = AB_TRANSPORT_SUPPORT ? createFrameBin
-                                   : createFrameUtf;
 function OpenEvent(target, data, id) {
   this.target = target;
   this.data = data;
@@ -1349,79 +715,598 @@ function CloseEvent(target, code, reason, hadError) {
   this.code = code;
   this.reason = reason || "";
   this.data = reason;
-  
+
 }
 
 CloseEvent.prototype.type = "close";
-function Channel(url, mode) {
-  this._id = null;
 
-  this._connecting = false;
-  this._opening = false;
-  this._closing = false;
-  this._connection = null;
-  this._request = null;
-  this._mode = null;
 
-  this.url = null;
-  this.path = null;
-  this.readyState = 0;
-  this.destroyed = false;
-
-  this.readable = false;
-  this.writable = false;
-  this.emitable = false;
-
-  this.connect(url, mode);
+function addEventHandler(target, event, handler) {
+  if (typeof event !== "string") {
+    throw new Error("Expected `event` as String");
+  }
+  if (typeof handler !== "function") {
+    throw new Error("Expected `handler` as Function");
+  }
+  if (!target._events[event]) {
+    target._events[event] = handler;
+  } else if (typeof target._events[event] !== 'function') {
+    target._events[event].push(handler);
+  } else {
+    target._events[event] = [target._events[event], handler];
+  }
 }
 
 
-Channel.VERSION = VERSION;
-Channel.SUPPORTED = SUPPORTED;
+function removeEventHandler(target, type, handler) {
+  var idx;
+  var handlers;
+  if (!type || !handler) {
+    return;
+  }
+  if (!(handlers = target._events[type])) {
+    return;
+  } else if (typeof handlers === 'function') {
+    if (handlers == handler) {
+      delete target._events[type];
+    }
+  } else {
+    idx = handlers.length;
+    while (idx--) {
+      if (handlers[idx] == handler) {
+        handlers.splice(idx, 1);
+        if (handlers.length == 1) {
+          target._events[type] = handlers[0];
+        }
+        break;
+      }
+    }
+  }
+}
 
-// We cannot use SocketInterface.name, IE do not support it.
-Channel.TRANSPORT = SocketInterface && SocketInterface.NAME;
 
-Channel.WEBSOCKET = hasWSSupport();
-Channel.FLASH = hasFlashSupport();
-Channel.COMET = hasCometSupport();
-
-Channel.MAXSIZE = PAYLOAD_MAX_SIZE;
-
-Channel.CONNECTING = Channel.prototype.CONNECTING = 0;
-Channel.OPEN = Channel.prototype.OPEN = 1;
-Channel.CLOSING = Channel.prototype.CLOSING = 2;
-Channel.CLOSED = Channel.prototype.CLOSED = 3;
+function callEventHandler(target, event, handler) {
+  try {
+    handler.call(target, event);
+  } catch (dispatchError) {
+    nextTick(function () {
+      throw dispatchError;
+    });
+  }
+}
 
 
-Channel.sizeOf = getsize;
+function dispatchEvent(event) {
+  var type;
+  var handler;
+  var target;
 
+  if (!event ||
+      typeof (type = event.type) !== 'string' ||
+      !(target = event.target)) {
+    return;
+  }
 
-Channel.prototype.connect = function(url, mode) {
-  var parse;
-  var self = this;
-  var packet;
-  var messagesize;
-  var request;
-  var channel;
-  var uri;
-  var id;
-  var host;
-  var mode;
-  var token;
-  var parsedUrl;
+  if ((handler = target['on' + type])) {
+    callEventHandler(target, event, handler);
+  }
+
+  if ((handler = target._events[event.type])) {
+
+    if (typeof handler !== "function") {
+      for (var i = 0, l = handler.length; i < l; i++) {
+        callEventHandler(target, event, handler[i]);
+      }
+    } else {
+      callEventHandler(target, event, handler);
+    }
+  }
+}
+
+var AVAILABLE_TRANSPORTS = {};
+var DEFAULT_TRANSPORT = null;
+var availableConnections = {};
+
+function getConnection(channel, urlobj, options) {
+  var transport;
+  var connection;
+  var connections;
+  var connkey;
+  var connurl;
   var path;
 
-  if (!SUPPORTED) {
+  var allowTransportFallback;
+
+  if (options && options.transport !== "auto") {
+    transport = options.transport;
+    allowTransportFallback = false;
+  } else if ("__FORCE_TRANSPORT_SOCKET__" in global){
+    transport = global.__FORCE_TRANSPORT_SOCKET__;
+    allowTransportFallback = false;
+  } else {
+    if (DEFAULT_TRANSPORT == null) {
+      throw new Error("Browser does not support any of the transport protocols");
+    }
+    transport = DEFAULT_TRANSPORT;
+    if (options && options.allowTransportFallback) {
+      allowTransportFallback = options.allowTransportFallback;
+    } else {
+      allowTransportFallback = true;
+    }
+  }
+
+  if (transport in AVAILABLE_TRANSPORTS == false) {
+    throw new Error("Bad transport '" + transport + "'");
+  }
+
+  connurl = connectionUrl(urlobj);
+  connkey = connectionKey(connurl, transport);
+  path = urlobj.path;
+
+  if ((connections = availableConnections[connkey])) {
+    for (var i = 0; i < connections.length; i++) {
+      if (path in connections[i].channels == false) {
+        connection = connections[i];
+        break;
+      }
+    }
+  }
+
+  if (!connection) {
+    connection = new Connection(connurl, transport, allowTransportFallback);
+    if (transport in availableConnections == false) {
+      availableConnections[connkey] = [];
+    }
+    availableConnections[connkey].push(connection);
+  }
+
+  connection.createChannel(channel, urlobj.path);
+
+  return connection;
+}
+
+
+function connectionKey(connurl, transport) {
+  return [transport, connurl].join(':');
+}
+
+
+function connectionUrl(urlobj) {
+  var result;
+  var protocol;
+
+  result = [urlobj.protocol, '://', urlobj.host];
+
+  if (urlobj.port) {
+    result.push(':' + urlobj.port);
+  }
+
+  return result.join('');
+}
+
+
+function Connection(url, transport, allowTransportFallback) {
+  this.url = url;
+  this.transport = transport;
+  this.refcount = 0;
+  this.channels = {};
+  this.routes = {};
+  this.socket = null;
+  this.connecting = false;
+  this.connected = false;
+
+  this.keepAliveTimer = null;
+  this.lastSentMessage = 0;
+
+  this.allowTransportFallback = allowTransportFallback;
+
+  this.bindTransport();
+}
+
+
+Connection.prototype.bindTransport = function() {
+  var self = this;
+  var initTransport;
+  var socket;
+
+  initTransport = AVAILABLE_TRANSPORTS[self.transport];
+  socket = initTransport(self.url);
+
+  socket.onopen = function() {
+    var channels = self.channels;
+    self.connected = true;
+    self.connecting = false;
+    for (var path in channels) {
+      self.send(0, OP_RESOLVE, 0, path);
+    }
+    self.startKeepAliveTimer();
+  };
+
+  socket.onframe = function(ptr, op, flag, data) {
+    switch (op) {
+      case OP_HEARTBEAT: return;
+      case OP_OPEN: return self.processOpen(ptr, flag, data);
+      case OP_DATA: return self.processData(ptr, flag, data);
+      case OP_SIGNAL: return self.processSignal(ptr, flag, data);
+      case OP_RESOLVE: return self.processResolve(ptr, flag, data);
+    }
+  };
+
+  socket.onerror = function(err) {
+    var reason;
+
+    self.socket = null;
+
+    this.onopen = null;
+    this.onclose = null;
+    this.onerror = null;
+    this.onframe = null;
+
+    self.destroy(err);
+  };
+
+  socket.onclose = function(event) {
+    var reason;
+    var code;
+
+    self.socket = null;
+
+    this.onopen = null;
+    this.onclose = null;
+    this.onerror = null;
+    this.onframe = null;
+
+    if (event) {
+      code = event.code || STATUS_NORMAL_CLOSURE;
+
+      if (code != STATUS_NORMAL_CLOSURE) {
+        reason = event.message || event.reason || "Connection reset by server";
+      }
+    } else {
+      code = event.code || STATUS_ABNORMAL_CLOSURE;
+      reason = "Connection reset by server";
+    }
+
+    if (code == STATUS_TRANSPORT_FAILURE &&
+        self.connecting == true &&
+        self.allowTransportFallback == true &&
+        "fallbackTransport" in this &&
+        this.fallbackTransport in AVAILABLE_TRANSPORTS) {
+      // Try with a fallback socket if available
+      self.transport = this.fallbackTransport;
+      self.bindTransport();
+      return;
+    }
+
+    self.destroy(null, code, reason);
+  };
+
+  socket._destroyed = false;
+
+  socket.destroy = function(err, code, reason) {
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
+    if (err && this.onerror) {
+      this.onerror(err);
+    }
+
+    if (code && this.onclose) {
+      this.onclose(null, code, reason);
+    }
+
+    this.close();
+  };
+
+  this.socket = socket;
+  this.connecting = true;
+};
+
+
+Connection.prototype.createChannel = function(channel, path) {
+  var channels = this.channels
+  var socket = this.socket;
+  var channel;
+  var frame;
+
+  if (path in channels) {
+    throw new Error("Channel already created");
+  }
+
+  channels[path] = channel;
+  this.refcount++;
+
+  // Do not send request if socket isnt handshaked yet
+  if (this.connected) {
+    this.send(0, OP_RESOLVE, 0, path);
+  }
+};
+
+
+Connection.prototype.destroyChannel = function(channel, err, code, data) {
+  var channels = this.channels
+  var routes = this.routes;
+
+  if (typeof channel._path !== 'string') {
+    return;
+  }
+
+  delete channels[channel._path];
+
+  if (typeof channel._ptr == 'number') {
+    delete routes[channel._ptr];
+  }
+
+  channel._onend(err, code, data);
+
+  if (--this.refcount == 0) {
+    this.destroy();
+  }
+};
+
+
+Connection.prototype.send = function(ptr, op, flag, data) {
+  var frame;
+  if (this.socket && this.connected) {
+    this.lastSentMessage = (new Date()).getTime();
+    frame = this.socket.createFrame(ptr, op, flag, data);
+    return this.socket.send(frame);
+  } else {
+    return false;
+  }
+};
+
+
+Connection.prototype.startKeepAliveTimer = function () {
+  var self = this;
+  this.keepAliveTimer = setInterval(function () {
+    var now = (new Date()).getTime();
+
+    if (now - self.lastSentMessage >= 15000) {
+      self.send(0, OP_HEARTBEAT, 0);
+    }
+  }, 5000);
+};
+
+
+Connection.prototype.processOpen = function(ptr, flag, data) {
+  var channel;
+
+  if (!(channel = this.routes[ptr])) {
+    this.destroy(null, STATUS_PROTOCOL_ERROR, "UNKNOWN_OPEN_RESP_ERR");
+    return;
+  }
+
+  if (channel.readyState !== Channel.CONNECTING) {
+    this.destroy(null, STATUS_PROTOCOL_ERROR, "CHANNEL_NOT_CONNECTING_ERR");
+  }
+
+  if (flag == FLAG_ALLOW) {
+    channel._onopen(data);
+  } else {
+    this.destroyChannel(channel, null, STATUS_OPEN_DENIED, data);
+  }
+};
+
+
+Connection.prototype.processData = function(ptr, flag, data) {
+  var routes = this.routes;
+  var channel;
+
+  if (ptr === ALL_CHANNELS) {
+    for (var chanptr in routes) {
+      channel = routes[chanptr];
+      if (channel.readyState == Channel.OPEN && channel.readable) {
+        dispatchEvent(new MessageEvent(channel, flag, cloneData(data)));
+      }
+    }
+  } else if ((channel = routes[ptr])) {
+    if (channel.readyState == Channel.OPEN && channel.readable) {
+      dispatchEvent(new MessageEvent(channel, flag, data));
+    }
+  }
+};
+
+
+Connection.prototype.processSignal = function(ptr, flag, data) {
+  var routes = this.routes;
+  var frame;
+  var clone;
+  var channel;
+  var event;
+
+  switch (flag) {
+
+    case FLAG_EMIT:
+      if (ptr === ALL_CHANNELS) {
+        for (var chanptr in routes) {
+          channel = routes[chanptr];
+          if (channel.readyState == Channel.OPEN) {
+            dispatchEvent(new SignalEvent(channel, cloneData(data)));
+          }
+        }
+      } else if ((channel = routes[ptr])) {
+        if (channel.readyState == Channel.OPEN) {
+          dispatchEvent(new SignalEvent(channel, data));
+        }
+      }
+      break;
+
+    case FLAG_END:
+    case FLAG_ERROR:
+      if (ptr === ALL_CHANNELS) {
+        if (flag == FLAG_END) {
+          this.destroy(null, STATUS_NORMAL_CLOSURE, data);
+        } else {
+          this.destroy(null, STATUS_SIGNAL, data);
+        }
+        return;
+      }
+
+      if (!(channel = routes[ptr])) {
+        // Protocol violation. Channel does not exists in client. Ignore
+        // for now.
+        return;
+      }
+
+      if (channel.readyState == Channel.CLOSING) {
+        this.destroyChannel(channel, null, STATUS_NORMAL_CLOSURE);
+      } else {
+        this.send(ptr, OP_SIGNAL, FLAG_END);
+        if (flag == FLAG_END) {
+          this.destroyChannel(channel, null, STATUS_NORMAL_CLOSURE, data);
+        } else {
+          this.destroyChannel(channel, null, STATUS_SIGNAL, data);
+        }
+      }
+      break;
+
+    default:
+      this.destroy(null, STATUS_PROTOCOL_ERROR, "Unknown signal flag SIGFLAG");
+      return;
+  }
+};
+
+
+Connection.prototype.processResolve = function(ptr, flag, data) {
+  var channel;
+  var frame;
+  var path;
+
+  if (typeof data !== "string" || data.length == 0) {
+    this.destroy(null, STATUS_INVALID_PAYLOAD, "Resolve payload empty");
+    return;
+  }
+
+  path = data;
+
+  if (!(channel = this.channels[path])) {
+    return;
+  }
+
+  if (channel.readyState == Channel.CLOSING) {
+    this.destroyChannel(channel, null, STATUS_NORMAL_CLOSURE);
+    return;
+  }
+
+  if (flag != FLAG_ALLOW) {
+    this.destroyChannel(channel,
+                        null,
+                        STATUS_OPEN_DENIED,
+                        "Unable to resolve path");
+    return;
+  }
+
+  this.routes[ptr] = channel;
+  channel._ptr = ptr;
+
+  this.send(ptr, OP_OPEN, channel._mode, channel._token);
+};
+
+
+// Destroy connection with optional Error
+Connection.prototype.destroy = function(err, code, data) {
+  var channels = this.channels;
+  var connections;
+  var connkey;
+  var channel;
+  var idx;
+
+  if (!this.url) {
+    return;
+  }
+
+  connkey = connectionKey(this.url, this.transport);
+  connections = availableConnections[connkey];
+  idx = connections && connections.length || 0;
+
+  while (idx--) {
+    if (connections[idx] == this) {
+      connections.splice(idx, 1);
+      if (connections.length == 0) {
+        delete availableConnections[connkey];
+      }
+      break;
+    }
+  }
+
+  this.url = null;
+  this.connecting = false;
+  this.connected = false;
+  this.channels = {};
+  this.routes = {};
+  this.refcount = 0;
+  this.transport = null;
+
+  for (var path in channels) {
+    if ((channel = channels[path])) {
+      channel._onend(err, code, cloneData(data));
+    }
+  }
+
+  if (this.keepAliveTimer) {
+    clearInterval(this.keepAliveTimer);
+    this.keepAliveTimer = null;
+  }
+
+  if (this.socket) {
+    this.socket.onopen = null;
+    this.socket.onerror = null;
+    this.socket.onclose = null;
+    this.socket.onframe = null;
+    try {
+      this.socket.close();
+    } catch (err) {
+    } finally {
+      this.socket = null;
+    }
+  }
+};
+
+
+function bridgeOpenHandler() {
+  this.connected = true;
+
+  if (this.initTimer) {
+    clearTimeout(this.initTimer);
+    this.initTimer = null;
+  }
+
+  if (!this.onopen) {
+    return;
+  }
+
+  this.onopen();
+}
+
+
+function bridgeMessageHandler(data) {
+  if (!this.onmessage) {
+    return;
+  }
+
+  this.onmessage({
+    type: "message",
+    data: data
+  });
+}
+
+
+function bridgeErrorHandler(err) {
+  this.close(STATUS_TRANSPORT_FAILURE, err || "BRIDGE_UNKNOWN_ERR");
+}
+
+
+function bridgeCloseHandler() {
+  this.close(STATUS_ABNORMAL_CLOSURE, "BRIDGE_UNKNOWN_ERR");
+}
+function Channel(url, mode, options) {
+  var urlobj;
+  var protocol;
+
+  if (!DEFAULT_TRANSPORT) {
     throw new Error("Not supported in current browser");
-  }
-
-  if (this._connecting) {
-    throw new Error("ALREADY_CONNECTING_ERR");
-  }
-
-  if (this._closing) {
-    throw new Error("Channel is closing");
   }
 
   if (typeof url !== "string") {
@@ -1429,46 +1314,146 @@ Channel.prototype.connect = function(url, mode) {
   }
 
   if (/^http:\/\/|^https:\/\//.test(url) == false) {
-    url = "http://" + url;
+    protocol = /^http/.test(location.protocol) ? location.protocol : 'http:';
+    url = protocol + "//" + url;
   }
 
-  parsedUrl = parseUri(url);
+  urlobj = parseUri(url);
 
-  if (parsedUrl.protocol !== "https" && parsedUrl.protocol !== "http") {
+  if (urlobj.protocol !== "https" && urlobj.protocol !== "http") {
     throw new Error("bad protocol, expected `http` or `https`");
   }
 
-  mode = getBinMode(mode);
-
-  if (typeof mode !== "number") {
+  if (typeof (this._mode = getBinMode(mode)) !== "number") {
     throw new Error("Invalid mode");
   }
 
-  if (parsedUrl.query) {
-    token = decodeURIComponent(parsedUrl.query);
+  try {
+    this._connection = getConnection(this, urlobj, options);
+  } catch(connectionError) {
+    this._mode = 0;
+    throw connectionError;
   }
 
-  path = parsedUrl.path || '/';
+  this._path = urlobj.path;
+  this.url = this._connection.url + this._path;
 
-  this._mode = mode;
-  this._connecting = true;
-  this.path = path;
-  this.url = url;
+  this._token = urlobj.query || null;
+  this._ptr = null;
+  this._resolved = false;
+  this._endsig = null;
+  this._events = {};
+
+  this.readyState = Channel.CONNECTING;
 
   this.readable = ((this._mode & READ) == READ);
   this.writable = ((this._mode & WRITE) == WRITE);
   this.emitable = ((this._mode & EMIT) == EMIT);
+}
 
-  this.readyState = Channel.CONNECTING;
 
-  this._connection = Connection.getConnection(parsedUrl, false);
-  this._request = this._connection.open(this, path, mode, token);
+Channel.CONNECTING = Channel.prototype.CONNECTING = 0;
+Channel.OPEN = Channel.prototype.OPEN = 1;
+Channel.CLOSING = Channel.prototype.CLOSING = 2;
+Channel.CLOSED = Channel.prototype.CLOSED = 3;
+
+Channel.prototype.extensions = "";
+Channel.prototype.protocol = "";
+Channel.prototype.binaryType = typeof ArrayBuffer == "undefined" ? void(0)
+                                                                 : "arraybuffer";
+
+try {
+  Object.defineProperty(Channel.prototype, "bufferedAmount", {
+    configurable : true,
+    enumerable: true,
+    get: function () {
+      var socket = this._connection && this._connection.socket || null;
+      return  socket ? socket.bufferedAmount : 0;
+    }
+  });
+} catch (err) {
+  Channel.prototype.bufferedAmount = 0;
+}
+
+Channel.prototype._onopen = function(data) {
+  this._token = null;
+
+  if (this.readyState == Channel.CLOSING) {
+    this.channel.send(OP_SIGNAL, FLAG_END, this._endsig);
+    this._endsig = null;
+    return;
+  }
+
+  this.readyState = Channel.OPEN;
+
+  dispatchEvent(new OpenEvent(this, data));
+};
+
+
+Channel.prototype._onend = function(err, code, reason) {
+  var self = this;
+  var event;
+  var code;
+  var message;
+
+  if (this.readyState === Channel.CLOSED) {
+    return;
+  }
+
+  this.readyState = Channel.CLOSED;
+
+  this._ptr = null;
+  this._token = null;
+  this._resolved = false;
+  this._mode = null;
+
+  this._connection = null;
+  this._endsig = null;
+
+  if (err) {
+    event = new ErrorEvent(this, typeof err == "string" ? err : err.message);
+    dispatchEvent(event);
+  }
+
+  message = reason;
+
+  if (!code) {
+    code = STATUS_ABNORMAL_CLOSURE;
+    message = "Connection to remote closed";
+  }
+
+  event = new CloseEvent(this, code,  message || null, !!(err));
+  dispatchEvent(event);
+
+  this._path = null;
+  this._url = null;
+};
+
+
+Channel.prototype.on = function(event, handler) {
+  addEventHandler(this, event, handler);
+  return this;
+};
+
+
+Channel.prototype.off = function(event, handler) {
+  removeEventHandler(this, event, handler);
+  return this;
+};
+
+
+Channel.prototype.addEventListener = function(event, handler) {
+  addEventHandler(this, event, handler);
+};
+
+
+Channel.prototype.removeEventListener = function(event, handler) {
+  removeEventHandler(this, event, handler);
 };
 
 
 Channel.prototype.send = function(data, priority) {
   var flag = (arguments[1] || 0);
-  var frame;
 
   if (this.readyState !== Channel.OPEN) {
     throw new Error("INVALID_STATE_ERR");
@@ -1478,23 +1463,19 @@ Channel.prototype.send = function(data, priority) {
     throw new Error("NOT_WRITABLE_ERR");
   }
 
-  if (flag < 0 || flag > 3 || isNaN(flag)) {
-    throw new Error("Bad priority, expected Number between 0-3");
+  if (flag < 0 || flag > 7 || isNaN(flag)) {
+    throw new Error("Bad priority, expected Number between 0-7");
   }
 
   if (!data || (!data.length && !data.byteLength)) {
     throw new Error("Expected `data`");
   }
 
-  frame = createFrame(this._id, OP_DATA, flag, data);
-
-  return this._connection.send(frame);
+  return this._connection.send(this._ptr, OP_DATA, flag, data);
 };
 
 
 Channel.prototype.emit = function(data) {
-  var frame;
-  var flushed;
 
   if (this.readyState !== Channel.OPEN) {
     throw new Error("INVALID_STATE_ERR");
@@ -1508,753 +1489,669 @@ Channel.prototype.emit = function(data) {
     throw new Error("Expected `data`");
   }
 
-  frame = createFrame(this._id, OP_SIGNAL, FLAG_EMIT, data);
-
-  return this._connection.send(frame);
+  return this._connection.send(this._ptr, OP_SIGNAL, FLAG_EMIT, data);
 };
 
 
 Channel.prototype.close = function(data) {
   var frame;
 
-  if (this.destroyed || this._closing) {
+  if (this.readyState !== Channel.CONNECTING &&
+      this.readyState !== Channel.OPEN) {
     return;
+  }
+
+  if (typeof data == 'number') {
+    data = arguments[1];
   }
 
   if (data) {
     if ((!data.length && !data.byteLength)) {
       throw new Error("Expected `data`");
     }
-    this._endsig = data;
   }
-
-  this._destroy();
-};
-
-
-Channel.prototype._destroy = function() {
-  var frame;
-
-  if (this.destroyed || this._closing || !this.path) {
-    return;
-  }
-
-  if (!this._connection) {
-    finalizeDestroyChannel(this, null, STATUS_NORMAL_CLOSURE);
-    return;
-  }
-
-  this.readyState = Channel.CLOSING;
 
   this.readable = false;
   this.writable = false;
   this.emitable = false;
-  this._closing = true;
 
-  // Do not send ENDSIG if _request is present. We need to wait for
-  // the OPENSIG before we can close it.
-  if (this._request && !this._endsig &&
-      this._request.cancel()) {
-    this._request = null;
-    finalizeDestroyChannel(this, null, STATUS_NORMAL_CLOSURE);
-    return;
-  }
-
-  // Channel is open and we can therefor send ENDSIG immideitnly. This
-  // can fail, if TCP connection is dead. If so, we can
-  // destroy channel with good conscience.
-  if (!this._request) {
-    frame = createFrame(this._id, OP_SIGNAL, FLAG_END, this._endsig);
-    this._endsig = null;
-    this._connection.send(frame);
-  }
-};
-
-
-Channel.prototype._open = function(payload, id, path) {
-  var flushed = false;
-  var event;
-  var frame;
-  var sig;
-
-  this._id = id;
-
-  this._connecting = false;
-  this._request = null;
-
-  this._connection.channels[id] = this;
-  this._connection.channelsByPath[path] = this;
-  this._connection.chanRefCount++;
-
-  if (this._closing) {
-    frame = createFrame(id, OP_SIGNAL, FLAG_END, this._endsig);
-    this._endsig = null;
-    this._connection.send(frame);
+  if (this.readyState === Channel.OPEN) {
+    this._connection.send(this._ptr, OP_SIGNAL, FLAG_END, data);
   } else {
-    this.readyState = Channel.OPEN;
-    if (this.onopen) {
-      event = new OpenEvent(this, payload, id);
-      this.onopen(event);
-    }
+    this._endsig = data;
   }
+
+  this.readyState = Channel.CLOSING;
 };
+var WebSocketTransport = {
 
+  WebSocket: null,
+  binarySupport: false,
 
-function finalizeDestroyChannel(chan, err, code, message) {
-  var id = chan._id;
-  var path = chan.path;
-  var event;
-  var conn;
+  init: function(wsurl) {
+    var WebSocket = global.WebSocket;
+    var agent;
+    var tmpsock;
+    var m;
 
-  if (chan.destroyed) {
-    return;
-  }
+    if (global.MozWebSocket) {
+      WebSocket = global.MozWebSocket;
+    } else if ((binarySupport = ("binaryType" in WebSocket.prototype)) == false) {
+      agent = navigator.userAgent;
+      // Detect if we can use ArrayBuffers in transport
+      switch (true) {
 
-  if ((conn = chan._connection)) {
-    if (conn.channelsByPath[path] == chan) {
-      delete conn.channelsByPath[id];
-      conn.chanRefCount--;
-      if (conn.chanRefCount == 0 &&
-          conn.reqRefCount == 0) {
-        conn.setDisposed(true);
+        case (!!(m = /Chrome\/(\d+)/.exec(agent))) && (parseInt(m[1]) >= 15):
+        case (!!(m = /Firefox\/(\d+)/.exec(agent))) && (parseInt(m[1]) >= 11):
+        case (!!(m = /MSIE\s(\d+)/.exec(agent))) && (parseInt(m[1]) >= 10):
+        WebSocketTransport.binarySupport = true;
+        break;
+
+        default:
+        try {
+          tmpsock = new WebSocket(wsurl);
+          WebSocketTransport.binarySupport = !!(tmpsock.binaryType);
+          tmpsock.close();
+        } catch (e) {
+        }
+        break;
       }
     }
-    if (conn.channels[id] == chan) {
-      delete conn.channels[id];
-    }
+
+    WebSocketTransport.WebSocket = WebSocket;
+  }
+};
+
+
+function webSocketInit(url) {
+  var WebSocket;
+  var urlobj;
+  var wsurl;
+
+  urlobj = parseUri(url);
+
+  wsurl = (urlobj.protocol == 'http' ? 'ws://' : 'wss://') + urlobj.host;
+  if (urlobj.port) {
+    wsurl += ':' + port;
   }
 
-  chan.readyState = Channel.CLOSED;
-
-  chan.readable = false;
-  chan.writable = false;
-  chan.emitable = false;
-  chan.destroyed = true;
-  chan._request = null;
-  chan._connection = null;
-
-  try {
-    if (err && chan.onerror) {
-      event = new ErrorEvent(chan, typeof err == "string" ? err : err.message);
-      chan.onerror(event);
-    }
-  } catch (err) {
-    // Ignore any errors when emitting events.
+  if (!WebSocketTransport.WebSocket) {
+    WebSocketTransport.init(wsurl);
   }
 
   try {
-    if (chan.onclose) {
-      if (!code) {
-        code = STATUS_ABNORMAL_CLOSURE;
-        message = "Connection to remote closed";
-      }
-      event = new CloseEvent(chan, code,  message || null, !!(err));
-      chan.onclose(event);
-    }
-  } catch (err) {
-    // Ignore any errors when emitting events.
+    socket = new WebSocketTransport.WebSocket(wsurl,
+                                      ["wsutf.winkprotocol.org"].concat(
+                                          WebSocketTransport.binarySupport ?
+                                          ["wsbin.winkprotocol.org"] : []));
+  } catch (initError) {
+    return nextTick(function () {
+      socket.onclose({
+        code: STATUS_TRANSPORT_FAILURE,
+        message: initError.message || "Failed to connect to remote"
+      });
+    });
   }
 
-  chan._id = null;
-  chan.path = null;
-};
-// OpenRequest constructor.
-function OpenRequest(conn, path, flag, data) {
-  var requests = conn.requests;
-  var next;
-
-  this.id = null;
-
-  this.conn = conn;
-  this.path = path;
-  this.flag = flag;
-  this.data = data;
-  this.present = false;
-  this.sent = false;
-  this.destroyed = false;
-
-  this.prev = null;
-  this.next = null;
-
-  if ((next = requests[path])) {
-    while (next.next && (next = next.next)) {};
-    next.next = this;
+  if (WebSocketTransport.binarySupport) {
+    socket.binaryType = "arraybuffer";
+    socket.onmessage = sockMessageBinImpl;
+    socket.createFrame = createFrameBin;
   } else {
-    requests[path] = this;
+    socket.onmessage = sockMessageUtfImpl;
+    socket.createFrame = createFrameUtf;
   }
 
-  conn.reqRefCount++;
+  if ("bufferedAmount" in socket == false) {
+    socket.bufferedAmount = 0;
+  }
+
+  return socket;
+}
+
+if ((typeof DISABLE_WEBSOCKET == "undefined" || DISABLE_WEBSOCKET == false) &&
+    (global.WebSocket || global.MozWebSocket)) {
+  AVAILABLE_TRANSPORTS["websocket"] = webSocketInit;
+  DEFAULT_TRANSPORT = "websocket";
+}
+
+function hasFlashSupport() {
+  var nav = global.navigator;
+  var mkey = "application/x-shockwave-flash";
+  var ActiveX;
+  var mimes;
+  var major;
+  var plugin;
+
+  if ((/android/i).test(nav.userAgent)) {
+    return false;
+  }
+
+  if (typeof nav.plugins != "undefined" &&
+      (plugin = nav.plugins["Shockwave Flash"]) &&
+      plugin.description &&
+      ((mime = nav.mimeTypes) && mime[mkey] && mime[mkey].enabledPlugin)) {
+    major = /\s(\d+)/.exec(plugin.description);
+    return major[1] && (parseInt(major[1]) > 9);
+  } else if ((ActiveX = global.ActiveXObject)) {
+    try {
+      if ((plugin = new ActiveX("ShockwaveFlash.ShockwaveFlash"))) {
+        major = /\s(\d+)/.exec(plugin.GetVariable("$version"));
+        return major[1] && (parseInt(major[1]) > 9);
+      }
+    } catch(e) {
+      return false;
+    }
+  }
+
+  return false;
 }
 
 
-// Open Flags
-OpenRequest.FLAG_ALLOW = 0x0;
-OpenRequest.FLAG_DENY = 0x7;
+var FlashTransport = {
+  sockets: {},
+  ready: false,
+  bridge: null,
+
+  embed: function() {
+    var body;
+    var str = [];
+    var vars = [];
+    var objname;
+    var flashid;
+    var codebase;
+    var pluginpage;
+    var members;
+    var path;
+    var bridge;
+    var tmpl;
+    var id;
+
+    // Use channel as our global object if not using AMD/common-support.
+    if (EXPORTS !== "global") {
+      do {
+        objname = '__hydnaFlashTransport' + (Math.random() * 0xFFFFFFFF);
+      } while(global.document.getElementById(objname));
+      window[objname] = FlashTransport;
+    } else {
+      objname = OBJECT_NAME + '.__bridge';
+      Channel.__bridge = FlashTransport;
+    }
 
 
-OpenRequest.prototype.send = function() {
+    // Both `name` and `id` is required by internet explorer.
+    do {
+      id = "__" + time();
+    } while(global.document.getElementById(id));
+
+    members = { onhandshake: 1, onready: 1, onopen: 1,
+                onclose: 1, onerror: 1, onmessage: 1 };
+
+    for (var key in members) {
+      vars.push(key + "=" + objname + "." + key);
+    }
+
+    codebase = "http://fpdownload.macromedia.com/pub/shockwave/cabs/"
+               "flash/swflash.cab#version=9,0,0,0";
+
+    pluginpage = "http://www.macromedia.com/go/getflashplayer";
+
+    path = FLASH_PATH + "?" + (Math.random() * 0xFFFFFFFF);
+
+    str[0 ] = '<object name="' + id + '" id="' + id + '"' +
+              ' classid="clsid:d27cdb6e-ae6d-11cf-96b8-444553540000"' +
+              ' codebase="' +  codebase + '" name=' +
+              ' width="1" height="1">';
+    str[1 ] = '<param name="allowScriptAccess" value="always"></param>';
+    str[2 ] = '<param name="allowNetworking" value="true"></param>';
+    str[3 ] = '<param name="movie" value="' + path + '"></param>';
+    str[4 ] = '<param name="quality" value="low"></param>';
+    str[5 ] = '<param name="menu" value="false"></param>';
+    str[6 ] = '<param name="FlashVars" value="' + vars.join("&") + '">';
+    str[7 ] = '</param><param name="bgcolor" value="#ffffff"></param>';
+    str[8 ] = '<param name="wmode" value="transparent"></param>';
+    str[9 ] = '<embed  src="' + path + '" quality="low" bgcolor="#ffffff"' +
+              ' wmode="transparent" width="1" height="1"' +
+              ' swLiveConnect="true" allowScriptAccess="always"' +
+              ' allowNetworking="true" menu="false"' +
+              ' type="application/x-shockwave-flash"' +
+              ' FlashVars="' + vars.join("&") + '"' +
+              ' pluginspage="' + pluginpage + '">';
+    str[10] = '</object>';
+
+    tmpl = document.createElement("div");
+    tmpl.innerHTML = str.join("");
+    bridge = tmpl.childNodes[0];
+
+    if (!global.document.all) {
+      for (var i = 0; i < bridge.childNodes.length; i++) {
+        if (bridge.childNodes[i].nodeName.toUpperCase() == "EMBED") {
+          bridge = bridge.childNodes[i];
+          break;
+        }
+      }
+    }
+
+    bridge.style.position = "absolute";
+    bridge.style.top = "0px";
+    bridge.style.left = "0px";
+    bridge.style.width = "1px";
+    bridge.style.height = "1px";
+    bridge.style.zIndex = "-100000";
+
+    body = document.getElementsByTagName('body')[0];
+    body.appendChild(bridge);
+
+    FlashTransport.bridge = bridge;
+  },
+
+  onhandshake: function() {
+    return typeof navigator !== "undefined" && navigator.userAgent || "none";
+  },
+
+  onready: function() {
+    nextTick(function() {
+      var sockets = FlashTransport.sockets;
+      var socket;
+      var url;
+
+      FlashTransport.ready = true;
+
+      for (var id in sockets) {
+        socket = FlashTransport.sockets[id];
+        socket.init();
+      }
+    });
+    return true;
+  },
+
+  onopen: function(id) {
+    var socket;
+    if ((socket = FlashTransport.sockets[id])) {
+      socket.openHandler();
+    }
+  },
+
+  onmessage: function(id, data) {
+    var socket;
+    if ((socket = FlashTransport.sockets[id])) {
+      socket.messageHandler(data);
+    }
+  },
+
+  onerror: function(id, err) {
+    var socket;
+    if ((socket = FlashTransport.sockets[id])) {
+      socket.errorHandler(err);
+    }
+  },
+
+  onclose: function(id) {
+    var socket;
+    if ((socket = FlashTransport.sockets[id])) {
+      socket.closeHandler();
+    }
+  }
+};
+
+
+function FlashSocket(url) {
   var self = this;
 
-  if (this.present) {
+  this.id = uniqueId();
+  this.url = url;
+  this.connected = false;
+
+  this.initTimer = setTimeout(function () {
+    self.errorHandler("FLASH_INIT_TIMEOUT_ERR");
+  }, 15000);
+}
+
+FlashSocket.prototype.bufferedAmount = 0;
+
+FlashSocket.prototype.fallbackTransport = "comet";
+
+FlashSocket.prototype.onmessage = sockMessageUtfImpl;
+FlashSocket.prototype.createFrame = createFrameUtf;
+FlashSocket.prototype.openHandler = bridgeOpenHandler;
+FlashSocket.prototype.closeHandler = bridgeCloseHandler;
+FlashSocket.prototype.errorHandler = bridgeErrorHandler;
+FlashSocket.prototype.messageHandler = bridgeMessageHandler;
+
+
+FlashSocket.prototype.init = function () {
+  var urlobj = parseUri(this.url);
+  var url = urlobj.protocol + "://" + urlobj.host;
+
+  if (urlobj.protocol == 'https') {
+    // Currently no support for HTTPS over flash
+    this.errorHandler("FLASH_TLS_ERR");
     return;
   }
 
-  this.present = true;
+  FlashTransport.bridge.init(this.id, url);
+};
 
-  if (this.sent) {
-    throw new Error("OpenRequest is already sent");
+
+FlashSocket.prototype.send = function(data) {
+  var id = this.id;
+  nextTick(function () {
+    FlashTransport.bridge.send(id, data);
+  });
+};
+
+
+FlashSocket.prototype.close = function(code, reason) {
+  if (!this.id) {
+    return;
   }
 
-  nextTick(function() {
-    var frame;
+  if (this.connected) {
+    FlashTransport.bridge.close(this.id);
+    this.connected = false;
+  }
 
-    if (self.destroyed) return;
-    self.sent = true;
+  if (this.initTimer) {
+    clearTimeout(this.initTimer);
+    this.initTimer = null;
+  }
 
-    frame = createFrame(self.id, OP_OPEN, self.flag, self.data);
-    self.conn.send(frame);
+  delete FlashTransport.sockets[this.id];
+
+  this.id = null;
+
+  if (!this.onclose) {
+    return;
+  }
+
+  this.onclose({
+    type: "close",
+    code: code || STATUS_NO_STATUS_RCVD,
+    reason: reason || "FLASH_UNKNOWN_ERR"
   });
 
 };
 
 
-OpenRequest.prototype.resolve = function () {
-  var self = this;
+function flashSocketInit(url) {
+  var socket;
 
-  if (this.id) {
-    throw new Error('OpenRequest already have an ID');
+  socket = new FlashSocket(url);
+
+  FlashTransport.sockets[socket.id] = socket;
+
+  if (!FlashTransport.bridge) {
+    FlashTransport.embed();
   }
 
-  nextTick(function() {
-    var frame;
-
-    try {
-      frame = createFrame(0, OP_RESOLVE, 0, self.path);
-      self.conn.send(frame);
-    } catch (err) {
-      self.conn.destroy(err);
-    }
-  });  
-};
-
-
-OpenRequest.prototype.cancel = function() {
-  var id = this.id;
-  var conn = this.conn;
-  var requests = conn.requests;
-  var next;
-
-
-  if (this.sent) {
-    // We cannot cancel if request is already sent.
-
-    return false;
+  if (FlashTransport.ready) {
+    socket.init();
   }
 
-  if (requests[id] == this) {
-    if (this.next) {
-      requests[id] = this.next;
-    } else {
-      delete requests[id];
-    }
-  } else if (this.prev) {
-    this.prev = this.next;
-  }
-
-  this.destroy();
-
-  return true;
-};
-
-
-OpenRequest.prototype.destroy = function(err, code, reason) {
-  var conn;
-
-  if (!this.destroyed) {
-    if ((conn = this.conn) && conn.id) {
-      conn.reqRefCount--;
-      if (conn.reqRefCount == 0 &&
-          conn.chanRefCount == 0) {
-        conn.setDisposed(true);
-      }
-    }
-    if (code && this.onclose) {
-      this.onclose(err, code, reason);
-    }
-    this.destroyed = true;
-  }
-};
-
-
-// Destroy this OpenRequest and all other in chain
-OpenRequest.prototype.destroyAndNext = function(err, code, reason) {
-  if (this.next) {
-    this.next.destroyAndNext(err, code, reason);
-  }
-  this.destroy(err, code, reason);
+  return socket;
 }
 
 
-OpenRequest.prototype.processResolve = function(id, flag, path) {
-  if (flag != OpenRequest.FLAG_ALLOW) {
-    this.destroy(null, STATUS_OPEN_DENIED, "Unable to resolve path");
+if ((typeof DISABLE_FLASH == "undefined" || DISABLE_FLASH == false) &&
+     hasFlashSupport()) {
+  AVAILABLE_TRANSPORTS["flash"] = flashSocketInit;
+  DEFAULT_TRANSPORT = DEFAULT_TRANSPORT || "flash";
+}
+var CometTransport = {
+
+  inititalized: false,
+
+  sockets: {},
+  socketCount: 0,
+
+  idprefix: "__" + OBJECT_NAME.toLowerCase() + "__",
+
+  idsuffix: "__bridge__",
+
+  origin: global.location.origin || (function() {
+    var l = global.location;
+    return l.protocol == "file:" ?
+            "file://" :
+            l.protocol + "://" + l.hostname;
+  }()),
+
+  init: function() {
+    if ("attachEvent" in global) {
+      global.attachEvent("onmessage", CometTransport.messageHandler);
+    } else {
+      global.addEventListener("message", CometTransport.messageHandler, false);
+    }
+    CometTransport.inititalized = true;
+  },
+
+  destroy: function() {
+    if ("detachEvent" in global) {
+      global.detachEvent("onmessage", CometTransport.messageHandler);
+    } else {
+      global.removeEventListener("message", CometTransport.messageHandler, false);
+    }
+    CometTransport.inititalized = false;
+  },
+
+  // Global message handler for all incomming
+  // messages. We filter out the underlying FlashSocket
+  // by checking the origin.
+  messageHandler: function(event) {
+    var socket;
+    var data;
+    var id;
+    var op;
+
+    if (event.source == global ||
+        typeof event.data != "string" ||
+        event.data.length < 8) {
+      return;
+    }
+
+    id = event.data.substr(0, 8);
+
+    if (!(socket = CometTransport.sockets[id]) ||
+        !socket.messageHandler) {
+      return;
+    }
+
+    op = event.data.charCodeAt(8);
+    data = event.data.length > 8 ? event.data.substr(9) : null;
+
+    switch (op) {
+
+      // Handshake
+      case 0x01: return socket.openHandler();
+
+      // Error
+      case 0x02: return socket.errorHandler(data || "COMET_UNKNOWN_ERR");
+
+      // Message
+      case 0x03: return socket.messageHandler(data);
+
+      default: return socket.errorHandler("COMET_ILLGEALOP_ERR");
+    }
+  }
+
+};
+
+
+function CometSocket(url) {
+  var self = this;
+  var elemid;
+  var urlobj;
+  var src;
+  var body;
+
+  this.id = uniqueId(true);
+  this.url = url;
+  this.connected = false;
+  this.bridge = null;
+
+  elemid = CometTransport.idprefix + this.id + CometTransport.idsuffix;
+
+  this.elem = document.createElement('iframe');
+  this.elem.setAttribute("id", elemid);
+
+  this.elem.style.width = "0px";
+  this.elem.style.height = "0px";
+  this.elem.style.visibility = "hidden";
+
+  urlobj = parseUri(this.url);
+
+  src = urlobj.protocol + "://" + urlobj.host + COMET_PATH;
+  src = src + "?origin=" + CometTransport.origin;
+
+  this.elem.src = src;
+
+  function onload() {
+    var b = document.getElementById(elemid);
+    self.bridge = b.contentWindow;
+    self.bridge.postMessage(String(self.id), "*");
+  }
+
+  if ('addEventListener' in this.elem) {
+      this.elem.addEventListener("load", onload, false);
+  } else if ('attachEvent' in this.elem) {
+      this.elem.attachEvent("onload", onload);
+  } else {
+      this.elem.onload = onload;
+  }
+
+  body = document.getElementsByTagName('body')[0];
+  body.appendChild(this.elem);
+
+  this.initTimer = setTimeout(function () {
+    self.errorHandler("COMET_INIT_TIMEOUT_ERR");
+  }, 10000);
+}
+
+FlashSocket.prototype.bufferedAmount = 0;
+
+CometSocket.prototype.fallbackTransport = null;
+
+CometSocket.prototype.onmessage = sockMessageUtfImpl;
+CometSocket.prototype.createFrame = createFrameUtf;
+CometSocket.prototype.openHandler = bridgeOpenHandler;
+CometSocket.prototype.closeHandler = bridgeCloseHandler;
+CometSocket.prototype.errorHandler = bridgeErrorHandler;
+CometSocket.prototype.messageHandler = bridgeMessageHandler;
+
+
+CometSocket.prototype.send = function(data) {
+  this.bridge.postMessage("\x03" + data, "*");
+};
+
+
+CometSocket.prototype.close = function(code, reason) {
+  var bridge;
+  var elem;
+
+  if (!this.id) {
     return;
   }
-  
-  this.id = id;
-  this.send();
-};
 
-
-OpenRequest.prototype.processResponse = function(flag, payload) {
-  var conn = this.conn;
-  var request;
-  var err;
-  var content;
-  var reason;
-
-  if (this.next) {
-    if (flag == OpenRequest.FLAG_ALLOW) {
-      reason = "Channel is already open";
-      this.next.destroyAndNext(null, STATUS_CHANNEL_OPEN, reason);
-    } else {
-      this.next.prev = null;
-      conn.requests[this.path] = this.next;
-      conn.requests[this.path].send();
-    }
-  } else {
-    delete conn.requests[this.path];
-  }
-
-  switch (flag) {
-
-    case OpenRequest.FLAG_ALLOW:
-      this.onresponse(payload, this.id, this.path);
-      this.destroy();
-      break;
-
-    default:
-      this.destroy(null, STATUS_OPEN_DENIED, payload);
-      break;
-  }
-};
-
-// Represents a server connection.
-function Connection(id) {
-  this.id = id;
-  this.chanRefCount = 0;
-  this.reqRefCount = 0;
-  this.channelsByPath = {};
-  this.channels = {};
-  this.requests = {};
-  this.sock = null;
-  this.timeout = null;
-
-  this.keepAliveTimer = null;
-  this.lastSentMessage = 0;
-
-  Connection.all[id] = this;
-}
-
-
-Connection.all = {};
-Connection.disposed = {};
-
-
-Connection.getConnection = function(url) {
-  var id;
-  var connection;
-  var datacache = "";
-  var lastException;
-
-  id = url.protocol + ":" + url.host;
-
-  if ((connection = Connection.all[id])) {
-    return connection;
-  }
-
-  if ((connection = Connection.disposed[id])) {
-    connection.setDisposed(false);
-    return connection;
-  }
-
-  // rewrite url if initial token is present.
-  if (url.auth) {
-    url = parseUri([
-      url.protocol,
-      "://",
-      url.hostname,
-      "/?t=",
-      url.auth
-    ].join(""));
-  }
-
-
-  connection = new Connection(id);
-  connection.connect(url);
-
-  return connection;
-}
-
-
-Connection.prototype.connect = function(url) {
-  var self = this;
-
-  if (this.sock) {
-    throw new Error("Socket already connected");
-  }
-
-  nextTick(function() {
-    SocketInterface(url, function(err, sock) {
-      var requests = self.requests;
-
-      if (err) {
-        return self.destroy(err);
-      }
-
-      sockImplementation(self, sock);
-
-      if (self.reqRefCount == 0) {
-        // All requests was cancelled before we got a
-        // handshake from server. Dispose us.
-        self.setDisposed(true);
-      }
-
-      for (var id in requests) {
-        requests[id].resolve();
-      }
-    });
-  }, 0);
-};
-
-
-Connection.prototype.open = function(chan, path, mode, token) {
-  var self = this;
-  var channels = self.channels;
-  var channelsByPath = self.channelsByPath;
-  var oldchan;
-  var request;
-  var frame;
-
-  if ((oldchan = channelsByPath[path]) && !oldchan._closing) {
-    nextTick(function() {
-      var reason = "Channel is already open";
-      finalizeDestroyChannel(chan, null, STATUS_CHANNEL_OPEN, reason);
-    });
-    return null;
-  }
-
-  request = new OpenRequest(self, path, mode, token);
-
-  request.onresponse = function(payload, id, path) {
-    chan._open(payload, id, path);
-  };
-
-  request.onclose = function(err, code, reason) {
-    finalizeDestroyChannel(chan, err, code, reason);
-  };
-
-  if (self.sock && !oldchan) {
-    // Do not send request if socket isnt handshaked yet, or
-    // if a channel is open and waiting for an ENDSIG.
-    request.resolve();
-  }
-
-  return request;
-};
-
-
-Connection.prototype.setDisposed = function(state) {
-  var id = this.id;
-  var sock = this.sock;
-  var self = this;
-
-  if (!this.id || !sock) return;
-
-  if (state) {
-
-    if (sock) {
-      this.timeout = setTimeout(function() {
-        self.destroy();
-      }, 200);
-    }
-
-    if (this.keepAliveTimer) {
-      clearInterval(this.keepAliveTimer);
-      this.keepAliveTimer = null;
-    }
-
-    Connection.disposed[id] = this;
-    Connection.all[id] = undefined;
-
-  } else {
-
-    delete Connection.disposed[id];
-    Connection.all[id] = this;
-
-    if (this.timeout) {
-      clearTimeout(this.timeout);
-    }
-
-    this.startKeepAliveTimer();
-  }
-};
-
-
-Connection.prototype.startKeepAliveTimer = function () {
-  var self = this;
-  this.keepAliveTimer = setInterval(function () {
-    var now = (new Date()).getTime();
-    var frame;
-
-    if (now - self.lastSentMessage >= 15000) {
-      frame = createFrame(0, 0x0, 0);
-      self.send(frame);
-    }
-  }, 5000);
-};
-
-
-// Write a `Frame` to the underlying socket.
-Connection.prototype.send = function(frame) {
-  if (this.sock) {
-    this.lastSentMessage = (new Date()).getTime();
-    return this.sock.send(frame);
-  } else {
-    return false;
-  }
-};
-
-
-// Destroy connection with optional Error
-Connection.prototype.destroy = function(err, code, reason) {
-  var id = this.id;
-  var channels = this.channelsByPath;
-  var requests = this.requests;
-  var chan;
-  var request;
-  var queued;
-
-  if (!id) {
-    return;
-  }
+  delete CometTransport.sockets[this.id];
 
   this.id = null;
 
-  for (var path in channels) {
-    if ((chan = channels[path])) {
-      finalizeDestroyChannel(chan, err, code, reason);
-    }
+  CometTransport.socketCount--;
+
+  if (CometTransport.socketCount == 0) {
+    CometTransport.destroy();
   }
 
-  for (var path in this.requests) {
-    if ((request = requests[path])) {
-      request.destroyAndNext(err, code, reason);
-    }
+  if (this.initTimer) {
+    clearTimeout(this.initTimer);
+    this.initTimer = null;
   }
 
-  this.channels = {};
-  this.channelsByPath = {};
-  this.requests = {};
-  this.chanRefCount = 0;
-  this.reqRefCount = 0;
-
-  delete Connection.all[id];
-  delete Connection.disposed[id];
-
-  if (this.timeout) {
-    clearTimeout(this.timeout);
-    this.timeout = null;
+  if ((bridge = this.bridge)) {
+    this.connected = false;
+    this.bridge = null;
+    nextTick(function() {
+      try {
+        bridge.postMessage("\x02", "*");
+      } catch (err) {
+      }
+    });
   }
 
-  if (this.keepAliveTimer) {
-    clearInterval(this.keepAliveTimer);
-    this.keepAliveTimer = null;
+  if ((elem = this.elem)) {
+    this.elem = null;
+    elem.onload = null;
+    setTimeout(function () {
+      var body = document.getElementsByTagName('body')[0];
+      try { body.removeChild(elem); } catch (err) { }
+    }, 1);
   }
 
-  if (this.sock) {
-    try {
-      this.sock.close();
-    } catch (err) {
-    } finally {
-      this.sock = null;
-    }
+  if (!this.onclose) {
+    return;
   }
+
+  this.onclose({
+    type: "close",
+    code: code || STATUS_NO_STATUS_RCVD,
+    reason: reason || "COMET_UNKNOWN_ERR"
+  });
 };
 
 
-function sockImplementation(conn, sock) {
+function cometSocketInit(url) {
+  var socket;
 
-  conn.sock = sock;
+  socket = new CometSocket(url);
 
-  sock.onerror = function(event) {
-    conn.sock = null;
-    conn.destroy(new Error(event.message || "UNKNOWN_ERROR"));
-  };
+  CometTransport.sockets[socket.id] = socket;
+  CometTransport.socketCount++;
 
-  sock.onclose = function(event) {
-    var reason;
-    var code;
+  if (!CometTransport.inititalized) {
+    CometTransport.init();
+  }
 
-    conn.sock = null;
-
-    if (event) {
-      code = event.code || STATUS_NORMAL_CLOSURE;
-
-      if (code != STATUS_NORMAL_CLOSURE) {
-        reason = event.message || event.reason || "Connection reset by server";
-      } 
-    } else {
-      code = event.code || STATUS_ABNORMAL_CLOSURE;
-      reason = "Connection reset by server";
-    }
-
-    conn.destroy(null, code, reason);
-  };
-
-  sock.onopenframe = function(id, flag, payload) {
-    var requests = conn.requests;
-    var request;
-
-    for (var path in requests) {
-      if (requests[path].id == id) {
-        request = requests[path];
-        break;
-      }
-    }
-
-    if (!request) {
-      conn.destroy(null, STATUS_PROTOCOL_ERROR, "Bad channel pointer");
-      return;
-    }
-
-    request.processResponse(flag, payload);
-  };
-
-  sock.ondataframe = function(id, flag, payload) {
-    var channels = conn.channels;
-    var event;
-    var chan;
-
-    if (id === ALL_CHANNELS) {
-      for (var chanid in channels) {
-        chan = channels[chanid];
-        if (chan.readable && chan.onmessage) {
-          event = new MessageEvent(chan, flag, payload);
-          chan.onmessage(event);
-        }
-      }
-    } else if ((chan = channels[id])) {
-      if (chan.readable && chan.onmessage) {
-        event = new MessageEvent(chan, flag, payload);
-        chan.onmessage(event);
-      }
-    }
-  };
-
-  sock.onsignalframe = function(id, flag, payload) {
-    var channels = conn.channels;
-    var requests = conn.requests;
-    var frame;
-    var chan;
-    var message;
-    var event;
-
-    switch (flag) {
-
-      case FLAG_EMIT:
-        if (id === ALL_CHANNELS) {
-          for (var chanid in channels) {
-            chan = channels[chanid];
-            if (chan._closing == false && chan.onsignal) {
-              event = new SignalEvent(chan, payload);
-              chan.onsignal(event);
-            }
-          }
-        } else if ((chan = channels[id])) {
-          if (chan._closing == false && chan.onsignal) {
-            event = new SignalEvent(chan, payload);
-            chan.onsignal(event);
-          }
-        }
-        break;
-
-      case FLAG_END:
-      case FLAG_ERROR:
-
-        if (id === ALL_CHANNELS) {
-          if (flag == FLAG_END) {
-            conn.destroy(null, STATUS_NORMAL_CLOSURE, payload);
-          } else {
-            conn.destroy(null, STATUS_SIGNAL, payload);
-          }
-          return;
-        }
-
-        if (!(chan = channels[id])) {
-          // Protocol violation. Channel does not exists in client. Ignore
-          // for now.
-
-          return;
-        }
-
-        if (chan._closing) {
-          // User requested to close this channel. This ENDSIG is a
-          // response to that request. It is now safe to destroy
-          // channel. Note: We are intentionally not sending the message
-          // to the function, because channel is closed according
-          // to client.
-
-          finalizeDestroyChannel(chan, null, STATUS_NORMAL_CLOSURE);
-
-          if (requests[chan.path]) {
-            // Send pending open request if exists.
-            requests[chan.path].resolve();
-          }
-
-        } else {
-          // Server closed this channel. We need to respond with a
-          // ENDSIG in order to let server now that we received this
-          // signal.
-
-          frame = createFrame(id, OP_SIGNAL, FLAG_END);
-          conn.send(frame);
-
-          if (flag == FLAG_END) {
-            finalizeDestroyChannel(chan, null, STATUS_NORMAL_CLOSURE, payload);
-          } else {
-            finalizeDestroyChannel(chan, null, STATUS_SIGNAL, payload);
-          }
-        }
-        break;
-
-      default:
-        conn.destroy(null, STATUS_PROTOCOL_ERROR, "Unknown signal flag SIGFLAG");
-        return;
-    }
-
-  };
-
-
-  sock.onresolveframe = function(id, flag, payload) {
-    var requests = conn.requests;
-    var request;
-    var path;
-
-    if (payload.length == 0) {
-      conn.destroy(null, STATUS_INVALID_PAYLOAD, "Resolve payload empty");
-      return;
-    }
-
-    if ((request = requests[payload])) {
-      request.processResolve(id, flag, path);
-    }
-  };
-
-
-  conn.startKeepAliveTimer();
+  return socket;
 }
 
+
+if ((typeof DISABLE_COMET == "undefined" || DISABLE_COMET == false) &&
+     typeof global.postMessage != "undefined") {
+  AVAILABLE_TRANSPORTS["comet"] = cometSocketInit;
+  DEFAULT_TRANSPORT = DEFAULT_TRANSPORT || "comet";
+}
+var exports = EXPORTS == 'global' ? Channel : {};
+
+exports.VERSION = VERSION;
+exports.SUPPORTED = DEFAULT_TRANSPORT !== null;
+exports.WEBSOCKET = "websocket" in AVAILABLE_TRANSPORTS;
+exports.FLASH = "flash" in AVAILABLE_TRANSPORTS;
+exports.COMET = "comet" in AVAILABLE_TRANSPORTS;
+exports.MAXSIZE = PAYLOAD_MAX_SIZE;
+exports.sizeOf = getsize;
+
+if (EXPORTS !== "global") {
+  exports.Channel = Channel;
+}
+
+switch (EXPORTS) {
+
+  case "amd":
+  define([], function() {
+    return exports;
+  });
+  break;
+
+  case "common":
+  module.exports = exports;
+  break;
+
+  default:
+  if (OBJECT_NAME in global) {
+    throw new Error("Target name already taken, or is library already loaded");
+  }
+  global[OBJECT_NAME] = exports;
+  break;
+}
 
 
 })(this);
