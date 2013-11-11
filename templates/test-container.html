@@ -51,6 +51,7 @@
           var setupCallback;
           var testCallbacks = [];
           var teardownCallback;
+          var forceTransport;
           var callbackUrl;
           var starttime;
           var endtime;
@@ -79,7 +80,7 @@
           }
 
           if ('transport' in qs) {
-            window.__FORCE_TRANSPORT_SOCKET__ = qs.transport;
+            forceTransport = qs.transport || 'auto';
           }
 
           if ('callback' in qs) {
@@ -391,14 +392,11 @@
           root.createChannel = function (path, mode, dontCaptureErrors) {
             var ctor = window[channelConstructorName];
             var channel;
-            var protocol;
             var url;
 
             url = [root.domain, path].join('/');
 
-            protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
-
-            channel = new ctor(url, mode);
+            channel = new ctor(url, mode, { transport: forceTransport });
 
             root.log('Open channel "%s" (transport: %s)',
                      url,
