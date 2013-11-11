@@ -1337,6 +1337,7 @@ function Channel(url, mode, options) {
 
   this._path = urlobj.path;
   this.url = this._connection.url + this._path;
+  this.transport = this._connection.transport;
 
   this._token = urlobj.query || null;
   this._ptr = null;
