@@ -97,8 +97,7 @@
             root.timeout(10000);
           }, 5000);
 
-
-          deviceId = (function () {
+          root.deviceId = (function () {
             var hash;
             var str;
             var rnd;
@@ -378,35 +377,14 @@
 
 
           root.createRandomChannel = function (mode, dontCaptureErrors) {
-            var path;
-            var ctor = window[channelConstructorName];
-            var channel;
-            var protocol;
-            var url;
+            var path = ~~(Math.random() * 0xfffffff) + 1;
+            return root.createDeviceChannel(path, mode, dontCaptureErrors);
+          };
 
-            path = ~~(Math.random() * 0xfffffff) + 1;
-            url = [root.domain, deviceId, path].join('/');
 
-            protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
-
-            channel = new ctor(url, mode);
-
-            root.log('Open channel "%s" (transport: %s)',
-                     url,
-                     channel._connection.transport);
-
-            if (!dontCaptureErrors) {
-              channel.onerror = function (err) {
-                root.error(err);
-              };
-              channel.onclose = function (evt) {
-                root.error({ message: evt.reason });
-              };
-            }
-
-            channels.push(channel);
-
-            return channel;
+          root.createDeviceChannel = function (path, mode, dontCaptureErrors) {
+            path = [root.deviceId, path].join('/');
+            return root.createChannel(path, mode, dontCaptureErrors);
           };
 
 
@@ -416,7 +394,7 @@
             var protocol;
             var url;
 
-            url = root.domain + '/' + path;
+            url = [root.domain, path].join('/');
 
             protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
 

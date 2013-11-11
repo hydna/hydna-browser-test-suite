@@ -20,7 +20,7 @@ test.setup(function (readyCallback) {
   for (var id = START_CHANNEL; id < LAST_CHANNEL + 1; id++) {
     test.log('Open channel %s', id);
 
-    channel = test.createChannel(id, "rw");
+    channel = test.createDeviceChannel(id, "rw");
 
     channel.onopen = function () {
       if (count++ == MAX_CHANNELS) {

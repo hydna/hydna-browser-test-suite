@@ -10,8 +10,8 @@ test.name('Read-write-only test');
 test.timeout(5000);
 
 test.setup(function (readyCallback) {
-  readChannel = test.createChannel(100, 'r', true);
-  writeChannel = test.createChannel(101, 'w', true);
+  readChannel = test.createDeviceChannel(100, 'r', true);
+  writeChannel = test.createDeviceChannel(101, 'w', true);
   test.log('Waiting for channels to open');
   writeChannel.onopen = readyCallback;
 });
