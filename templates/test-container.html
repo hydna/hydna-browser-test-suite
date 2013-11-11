@@ -56,6 +56,7 @@
           var endtime;
           var timer;
           var elem;
+          var deviceId;
 
 
           if ('script' in qs == false) {
@@ -95,6 +96,34 @@
           timer = setTimeout(function () {
             root.timeout(10000);
           }, 5000);
+
+
+          deviceId = (function () {
+            var hash;
+            var str;
+            var rnd;
+            var c;
+
+            function pad (no) {
+              var result = no.toString(16);
+              while (result.length < 8) result = '0' + result;
+              return result;
+            }
+
+            str = navigator.userAgent + navigator.platform;
+            hash = 5381;
+
+            for (var i = 0; i < str.length; i++) {
+              c = str.charCodeAt(i);
+              hash = ((hash << 5) + hash) + c;
+            }
+
+            hash = pad(hash.toString(16));
+
+            rnd = pad(parseInt(Math.random() * 0xFFFFFFFF));
+            
+            return [hash, rnd].join('/');
+          }());
 
 
           function initialize () {
@@ -349,18 +378,22 @@
 
 
           root.createRandomChannel = function (mode, dontCaptureErrors) {
-            var path = ~~(Math.random() * 0xfffffff) + 1;
+            var path;
             var ctor = window[channelConstructorName];
             var channel;
             var protocol;
             var url;
 
-            url = root.domain + '/' + path;
+            path = ~~(Math.random() * 0xfffffff) + 1;
+            url = [root.domain, deviceId, path].join('/');
 
             protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
-            root.log('Open channel "%s" (protocol: %s)', url, protocol);
 
             channel = new ctor(url, mode);
+
+            root.log('Open channel "%s" (transport: %s)',
+                     url,
+                     channel._connection.transport);
 
             if (!dontCaptureErrors) {
               channel.onerror = function (err) {
@@ -386,9 +419,12 @@
             url = root.domain + '/' + path;
 
             protocol = window.__FORCE_TRANSPORT_SOCKET__ || 'auto';
-            root.log('Open channel "%s" (protocol: %s)', url, protocol);
 
             channel = new ctor(url, mode);
+
+            root.log('Open channel "%s" (transport: %s)',
+                     url,
+                     channel._connection.transport);
 
             if (!dontCaptureErrors) {
               channel.onerror = function (err) {
