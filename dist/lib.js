@@ -1805,7 +1805,7 @@ function FlashSocket(url) {
 
   this.initTimer = setTimeout(function () {
     self.errorHandler("FLASH_INIT_TIMEOUT_ERR");
-  }, 15000);
+  }, 25000);
 }
 
 FlashSocket.prototype.bufferedAmount = 0;
