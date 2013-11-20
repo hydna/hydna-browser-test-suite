@@ -1573,7 +1573,7 @@ function webSocketInit(url) {
 
   wsurl = (urlobj.protocol == 'http' ? 'ws://' : 'wss://') + urlobj.host;
   if (urlobj.port) {
-    wsurl += ':' + port;
+    wsurl += ':' + urlobj.port;
   }
 
   if (!WebSocketTransport.WebSocket) {
@@ -1615,6 +1615,7 @@ if ((typeof DISABLE_WEBSOCKET == "undefined" || DISABLE_WEBSOCKET == false) &&
   AVAILABLE_TRANSPORTS["websocket"] = webSocketInit;
   DEFAULT_TRANSPORT = "websocket";
 }
+
 
 function hasFlashSupport() {
   var nav = global.navigator;
@@ -1805,7 +1806,7 @@ function FlashSocket(url) {
 
   this.initTimer = setTimeout(function () {
     self.errorHandler("FLASH_INIT_TIMEOUT_ERR");
-  }, 25000);
+  }, 15000);
 }
 
 FlashSocket.prototype.bufferedAmount = 0;
@@ -1823,6 +1824,9 @@ FlashSocket.prototype.messageHandler = bridgeMessageHandler;
 FlashSocket.prototype.init = function () {
   var urlobj = parseUri(this.url);
   var url = urlobj.protocol + "://" + urlobj.host;
+  if (urlobj.port) {
+    url += ':' + urlobj.port;
+  }
 
   if (urlobj.protocol == 'https') {
     // Currently no support for HTTPS over flash
@@ -1898,6 +1902,7 @@ if ((typeof DISABLE_FLASH == "undefined" || DISABLE_FLASH == false) &&
   AVAILABLE_TRANSPORTS["flash"] = flashSocketInit;
   DEFAULT_TRANSPORT = DEFAULT_TRANSPORT || "flash";
 }
+
 var CometTransport = {
 
   inititalized: false,
@@ -1981,6 +1986,7 @@ function CometSocket(url) {
   var self = this;
   var elemid;
   var urlobj;
+  var port;
   var src;
   var body;
 
@@ -2000,7 +2006,8 @@ function CometSocket(url) {
 
   urlobj = parseUri(this.url);
 
-  src = urlobj.protocol + "://" + urlobj.host + COMET_PATH;
+  port = (urlobj.port?':' + urlobj.port:'');
+  src = urlobj.protocol + "://" + urlobj.host + port + COMET_PATH;
   src = src + "?origin=" + CometTransport.origin;
 
   this.elem.src = src;
@@ -2120,6 +2127,7 @@ if ((typeof DISABLE_COMET == "undefined" || DISABLE_COMET == false) &&
   AVAILABLE_TRANSPORTS["comet"] = cometSocketInit;
   DEFAULT_TRANSPORT = DEFAULT_TRANSPORT || "comet";
 }
+
 var exports = EXPORTS == 'global' ? Channel : {};
 
 exports.VERSION = VERSION;
