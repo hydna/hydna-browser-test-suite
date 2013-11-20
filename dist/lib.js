@@ -451,7 +451,6 @@ function createFrameUtf(ptr, op, flag, data) {
   var payload;
   var result;
   var ctype;
-  var b;
 
   ctype = PAYLOAD_TYPE_TEXT;
 
@@ -503,9 +502,6 @@ function createFrameUtf(ptr, op, flag, data) {
 
 
 function getsize(data) {
-  var buffer;
-  var view;
-
   if (typeof data == "string") {
     return unescape(encodeURIComponent(data)).length;
   } else if (data instanceof ArrayBuffer ||
@@ -529,7 +525,7 @@ function sockMessageBinImpl(event) {
   var payload;
   var tmp;
 
-  if ((data = event.data) instanceof ArrayBuffer == false) {
+  if ((data = event.data) instanceof ArrayBuffer === false) {
     return this.close(null, STATUS_PROTOCOL_ERROR, "ERR_UNSUPPORTED_TYPE");
   }
 
@@ -665,7 +661,7 @@ function cloneData(data) {
 
   return clone;
 }
-function OpenEvent(target, data, id) {
+function OpenEvent(target, data) {
   this.target = target;
   this.data = data;
 }
@@ -933,7 +929,6 @@ Connection.prototype.bindTransport = function() {
   };
 
   socket.onerror = function(err) {
-    var reason;
 
     self.socket = null;
 
@@ -1008,7 +1003,6 @@ Connection.prototype.createChannel = function(channel, path) {
   var channels = this.channels
   var socket = this.socket;
   var channel;
-  var frame;
 
   if (path in channels) {
     throw new Error("Channel already created");
@@ -1392,7 +1386,6 @@ Channel.prototype._onopen = function(data) {
 
 
 Channel.prototype._onend = function(err, code, reason) {
-  var self = this;
   var event;
   var code;
   var message;
@@ -1565,7 +1558,6 @@ var WebSocketTransport = {
 
 
 function webSocketInit(url) {
-  var WebSocket;
   var urlobj;
   var wsurl;
 
@@ -1621,7 +1613,6 @@ function hasFlashSupport() {
   var nav = global.navigator;
   var mkey = "application/x-shockwave-flash";
   var ActiveX;
-  var mimes;
   var major;
   var plugin;
 
@@ -1660,7 +1651,6 @@ var FlashTransport = {
     var str = [];
     var vars = [];
     var objname;
-    var flashid;
     var codebase;
     var pluginpage;
     var members;
@@ -1755,7 +1745,6 @@ var FlashTransport = {
     nextTick(function() {
       var sockets = FlashTransport.sockets;
       var socket;
-      var url;
 
       FlashTransport.ready = true;
 
