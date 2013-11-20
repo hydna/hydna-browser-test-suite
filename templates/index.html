@@ -358,15 +358,15 @@
       function checkTransports () {
         var parent = document.getElementById('transports');
 
-        if (!TestChannel.WEBSOCKET) {
+        if ('disable-websocket' in qs || !TestChannel.WEBSOCKET) {
           parent.removeChild(document.getElementById('transports-websocket'));
         }
 
-        if (!TestChannel.FLASH) {
+        if ('disable-flash' in qs || !TestChannel.FLASH) {
           parent.removeChild(document.getElementById('transports-flash'));
         }
 
-        if (!TestChannel.COMET) {
+        if ('disable-comet' in qs || !TestChannel.COMET) {
           parent.removeChild(document.getElementById('transports-comet'));
         }
 
