@@ -8,7 +8,7 @@ var DENY_RESP         = 'DENIED';
 var testChannel;
   
 test.name('deny test');
-test.timeout(5000);
+test.timeout(10000);
 
 test.setup(function (readyCallback) {
   testChannel = test.createChannel('open-deny', 'rw+e');

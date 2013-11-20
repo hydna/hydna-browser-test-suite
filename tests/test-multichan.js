@@ -10,7 +10,7 @@ var LAST_CHANNEL      = START_CHANNEL + MAX_CHANNELS;
 var channels = [];
   
 test.name('Multi-channel test');
-test.timeout(10000);
+test.timeout(20000);
 
 
 test.setup(function (readyCallback) {
